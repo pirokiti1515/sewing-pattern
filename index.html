@@ -151,6 +151,8 @@
   .vertex.sel { fill: #f59e0b; stroke: #b45309; stroke-width: 2.5; }
   .selpt { fill: #fff; stroke: #2563eb; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
   .selpt.on { fill: #f59e0b; stroke: #b45309; stroke-width: 2; }
+  .sel-box { fill: none; stroke: #2563eb; stroke-width: 1; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; }
+  .sel-grip { fill: #fff; stroke: #2563eb; stroke-width: 1.8; vector-effect: non-scaling-stroke; cursor: nwse-resize; }
   .text-sel { fill: none; stroke: #2563eb; stroke-width: 1.5; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
   .marquee { fill: rgba(37,99,235,0.12); stroke: #2563eb; stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
   .edge-hover { fill: none; stroke: #f59e0b; stroke-width: 6; stroke-linecap: round; opacity: .55; vector-effect: non-scaling-stroke; pointer-events: none; }
@@ -245,7 +247,14 @@
     <!-- 文字ツールの時だけ：文字サイズ -->
     <span class="ctx" id="ctx-text">
       <span class="sep"></span>
+      <label title="字体">字体<select id="text-font" style="padding:3px 4px;border-radius:4px;border:1px solid #4b5563;background:#374151;color:#f9fafb">
+        <option value="gothic">ゴシック</option>
+        <option value="mincho">明朝</option>
+        <option value="maru">丸ゴシック</option>
+        <option value="mono">等幅</option>
+      </select></label>
       <label title="文字の大きさ">文字<input type="number" id="text-size" value="20" min="4" step="1">mm</label>
+      <label title="太字"><input type="checkbox" id="text-bold">太字</label>
       <label title="細長いパーツの名前などに"><input type="checkbox" id="text-vertical">縦書き</label>
       <label title="文字の色"><input type="color" id="text-color" value="#111827" style="width:26px;height:22px;padding:0;border:1px solid #4b5563;border-radius:4px;background:none"></label>
     </span>
@@ -352,6 +361,13 @@ function renderThrottled(){
 }
 
 const PALETTE = ["#2563eb","#dc2626","#16a34a","#d97706","#7c3aed","#0891b2","#db2777","#65a30d"];
+const FONTS = {
+  gothic: '"Hiragino Sans","Yu Gothic","Noto Sans JP",sans-serif',
+  mincho: '"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif',
+  maru:   '"Hiragino Maru Gothic ProN","Yu Gothic",sans-serif',
+  mono:   '"SFMono-Regular",Menlo,Consolas,monospace'
+};
+const fontOf = (t)=> FONTS[t && t.font] || FONTS.gothic;
 const STITCH_COLOR = "#dc2626";   // ステッチ線は赤
 const COLORS = ["#2563eb","#0891b2","#16a34a","#65a30d","#d97706","#dc2626","#db2777","#7c3aed","#4b5563","#111827"];
 
@@ -378,8 +394,9 @@ let multiSel = [];          // [{partId, idx}] points selected by the 選択 too
 let marquee = null;         // {x0,y0,x1,y1} rubber-band rectangle (screen px)
 let selMove = null;         // {startW, orig:[{partId,idx,x,y}]} while moving the selection
 let suppressListRender = false;  // keep the sidebar DOM alive while typing in it
-let selTextId = null;      // text picked with the 選択 tool
+let selTexts = [];         // text ids picked with the 選択 tool
 let lastTClick = { id:null, t:0 };
+let scaleDrag = null;      // まとめて拡大縮小中
 let hoverEdge = null;       // {partId, i} edge whose middle handle is under the cursor
 let selMode = "points";     // "part" = whole part picked, "points" = individual points picked
 
@@ -424,7 +441,9 @@ function renderTexts(){
   for (const t of project.texts){
     if (editingTextId===t.id) continue; // hidden while its editor is open
     const s = worldToScreen(t);
-    const el = mk("text", { x:s.x, y:s.y, class:"canvas-text", fill:t.color||"#111827", "font-size": Math.max(6,(t.size||20)*view.scale) });
+    const el = mk("text", { x:s.x, y:s.y, class:"canvas-text", fill:t.color||"#111827",
+      "font-size": Math.max(6,(t.size||20)*view.scale),
+      "font-family": fontOf(t), "font-weight": t.bold ? "700" : "400" });
     if (t.vertical){ el.style.writingMode = "vertical-rl"; el.style.dominantBaseline = "auto"; }
     el.textContent = t.text;
     frag.appendChild(el);
@@ -491,6 +510,16 @@ function ellipseNodes(a, b){
 }
 
 // All anchor points whose screen position lies inside a screen-space rectangle.
+function textsInRect(x0,y0,x1,y1){
+  const xa=Math.min(x0,x1), xb=Math.max(x0,x1), ya=Math.min(y0,y1), yb=Math.max(y0,y1);
+  const res=[];
+  for (const t of project.texts){
+    const b=textBox(t);
+    const c=worldToScreen({x:(b.x0+b.x1)/2, y:(b.y0+b.y1)/2});
+    if (c.x>=xa && c.x<=xb && c.y>=ya && c.y<=yb) res.push(t.id);
+  }
+  return res;
+}
 function pointsInRect(x0,y0,x1,y1){
   const xa=Math.min(x0,x1), xb=Math.max(x0,x1), ya=Math.min(y0,y1), yb=Math.max(y0,y1);
   const res=[];
@@ -555,7 +584,9 @@ function duplicateSelection(){
 
 // Delete selected points; if a part loses everything, delete the whole part.
 function deleteSelection(){
-  if (!multiSel.length) return; pushUndo();
+  if (!multiSel.length && !selTexts.length) return; pushUndo();
+  if (selTexts.length){ project.texts = project.texts.filter(t=>!selTexts.includes(t.id)); selTexts = []; }
+  if (!multiSel.length){ selectedPartId=null; saveLocal(); render(); return; }
   const byPart={}; for (const m of multiSel){ (byPart[m.partId]=byPart[m.partId]||[]).push(m.idx); }
   for (const pid in byPart){
     const part=project.parts.find(p=>p.id===pid); if(!part) continue;
@@ -576,15 +607,17 @@ function wholePartSelected(){
 // Group the parts referenced by the current selection under a shared group id.
 function groupSelection(){
   const ids=[...new Set(multiSel.map(m=>m.partId))];
-  if (ids.length<1) return; pushUndo();
+  if (!ids.length && !selTexts.length) return; pushUndo();
   const gid = "g"+(idCounter++);
   for (const id of ids){ const p=project.parts.find(pp=>pp.id===id); if(p) p.group=gid; }
+  for (const tid of selTexts){ const t=project.texts.find(x=>x.id===tid); if(t) t.group=gid; }  // 文字も一緒に
   saveLocal(); render();
 }
 function ungroupSelection(){
   const ids=[...new Set(multiSel.map(m=>m.partId))];
-  if (!ids.length) return; pushUndo();
+  if (!ids.length && !selTexts.length) return; pushUndo();
   for (const id of ids){ const p=project.parts.find(pp=>pp.id===id); if(p) p.group=null; }
+  for (const tid of selTexts){ const t=project.texts.find(x=>x.id===tid); if(t) t.group=null; }
   saveLocal(); render();
 }
 // Recolor every part referenced by the current selection (Affinity: select then set color).
@@ -599,7 +632,7 @@ let clipboard = null;
 function copySelection(){
   const ids = [...new Set(multiSel.map(m=>m.partId))];
   const parts = ids.map(id=>project.parts.find(p=>p.id===id)).filter(Boolean);
-  const texts = selTextId ? project.texts.filter(t=>t.id===selTextId) : [];
+  const texts = project.texts.filter(t=>selTexts.includes(t.id));
   if (!parts.length && !texts.length) return false;
   clipboard = { parts: JSON.parse(JSON.stringify(parts)), texts: JSON.parse(JSON.stringify(texts)) };
   try { localStorage.setItem("sewing-clipboard", JSON.stringify(clipboard)); } catch(_){}
@@ -633,10 +666,95 @@ function pasteClipboard(){
   multiSel = [];
   newParts.forEach(c => c.nodes.forEach((_,i)=>multiSel.push({ partId:c.id, idx:i })));
   selectedPartId = newParts.length ? newParts[newParts.length-1].id : null;
-  selTextId = newTexts.length ? newTexts[newTexts.length-1].id : null;
+  selTexts = newTexts.map(t=>t.id);
   selMode = "part";
   saveLocal(); render();
   return true;
+}
+// ----- 複数選択のまとめて拡大縮小 -----
+function selBounds(){
+  let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity,n=0;
+  for (const m of multiSel){ const nd=nodeOf(m); if(nd){ x0=Math.min(x0,nd.x); y0=Math.min(y0,nd.y); x1=Math.max(x1,nd.x); y1=Math.max(y1,nd.y); n++; } }
+  for (const id of selTexts){ const t=project.texts.find(x=>x.id===id); if(t){ const b=textBox(t);
+    x0=Math.min(x0,b.x0); y0=Math.min(y0,b.y0); x1=Math.max(x1,b.x1); y1=Math.max(y1,b.y1); n++; } }
+  return n ? { x0,y0,x1,y1 } : null;
+}
+function showResizeBox(){
+  // 2つ以上（パーツ／文字）を選んだ時だけ。単体の点編集を邪魔しないため
+  const count = new Set(multiSel.map(m=>m.partId)).size + selTexts.length;
+  if (count < 2) return false;
+  const b = selBounds();
+  return !!b && (b.x1-b.x0 > 1e-6 || b.y1-b.y0 > 1e-6);
+}
+// ハンドルは枠より少し外側に置き、図形の頂点と重ならないようにする
+function selBoundsPadded(){
+  const b = selBounds(); if (!b) return null;
+  const pad = 10 / view.scale;
+  return { x0:b.x0-pad, y0:b.y0-pad, x1:b.x1+pad, y1:b.y1+pad };
+}
+function resizeHandles(){
+  const b = selBoundsPadded(); if (!b) return [];
+  const mx=(b.x0+b.x1)/2, my=(b.y0+b.y1)/2;
+  return [
+    { k:"nw", x:b.x0, y:b.y0, ax:b.x1, ay:b.y1, sx:1, sy:1 },
+    { k:"n",  x:mx,   y:b.y0, ax:mx,   ay:b.y1, sx:0, sy:1 },
+    { k:"ne", x:b.x1, y:b.y0, ax:b.x0, ay:b.y1, sx:1, sy:1 },
+    { k:"e",  x:b.x1, y:my,   ax:b.x0, ay:my,   sx:1, sy:0 },
+    { k:"se", x:b.x1, y:b.y1, ax:b.x0, ay:b.y0, sx:1, sy:1 },
+    { k:"s",  x:mx,   y:b.y1, ax:mx,   ay:b.y0, sx:0, sy:1 },
+    { k:"sw", x:b.x0, y:b.y1, ax:b.x1, ay:b.y0, sx:1, sy:1 },
+    { k:"w",  x:b.x0, y:my,   ax:b.x1, ay:my,   sx:1, sy:0 },
+  ];
+}
+function findResizeHandleAt(sp){
+  if (!showResizeBox()) return null;
+  for (const h of resizeHandles()){
+    const s2 = worldToScreen(h);
+    if (Math.hypot(sp.x-s2.x, sp.y-s2.y) < 9) return h;
+  }
+  return null;
+}
+function beginScale(h, wp){
+  const partIds = [...new Set(multiSel.map(m=>m.partId))];
+  scaleDrag = {
+    h, anchor:{ x:h.ax, y:h.ay }, from:{ x:h.x, y:h.y },
+    nodes: multiSel.map(m=>{ const nd=nodeOf(m); return { partId:m.partId, idx:m.idx, x:nd.x, y:nd.y,
+      hIn: nd.hIn?{...nd.hIn}:null, hOut: nd.hOut?{...nd.hOut}:null }; }),
+    notches: partIds.flatMap(id=>{ const p=project.parts.find(pp=>pp.id===id);
+      return (p&&p.notches)? p.notches.map((q,i)=>({partId:id, i, x:q.x, y:q.y})) : []; }),
+    texts: selTexts.map(id=>{ const t=project.texts.find(x=>x.id===id); return t?{id, x:t.x, y:t.y, size:t.size||20}:null; }).filter(Boolean)
+  };
+}
+function applyScale(shift){
+  const d = scaleDrag; if (!d) return;
+  const a = d.anchor;
+  const denX = d.from.x - a.x, denY = d.from.y - a.y;
+  let sx = d.h.sx && Math.abs(denX)>1e-6 ? (mouseWorld.x - a.x)/denX : 1;
+  let sy = d.h.sy && Math.abs(denY)>1e-6 ? (mouseWorld.y - a.y)/denY : 1;
+  if (shift){                                   // Shift = 縦横比を固定
+    const f = d.h.sx && d.h.sy ? Math.max(Math.abs(sx), Math.abs(sy))
+                               : (d.h.sx ? Math.abs(sx) : Math.abs(sy));
+    sx = (sx<0?-1:1) * f; sy = (sy<0?-1:1) * f;
+  }
+  const lim = (v)=> (Math.abs(v)<0.01 ? (v<0?-0.01:0.01) : v);
+  sx = lim(sx); sy = lim(sy);
+  for (const o of d.nodes){
+    const nd = nodeOf(o); if (!nd) continue;
+    nd.x = a.x + (o.x-a.x)*sx;  nd.y = a.y + (o.y-a.y)*sy;
+    nd.hIn  = o.hIn  ? { x:o.hIn.x*sx,  y:o.hIn.y*sy }  : null;
+    nd.hOut = o.hOut ? { x:o.hOut.x*sx, y:o.hOut.y*sy } : null;
+  }
+  for (const o of d.notches){
+    const p = project.parts.find(pp=>pp.id===o.partId);
+    if (p && p.notches && p.notches[o.i]){ p.notches[o.i].x = a.x+(o.x-a.x)*sx; p.notches[o.i].y = a.y+(o.y-a.y)*sy; }
+  }
+  const fs = (Math.abs(sx)+Math.abs(sy))/2;
+  for (const o of d.texts){
+    const t = project.texts.find(x=>x.id===o.id); if (!t) continue;
+    t.x = a.x + (o.x-a.x)*sx;  t.y = a.y + (o.y-a.y)*sy;
+    t.size = Math.max(2, Math.round(o.size*fs));
+  }
+  renderThrottled();
 }
 // Magnet: nudge a move delta so a moving vertex snaps onto another part's vertex
 // (corner-to-corner), or aligns to its x/y (edge/line-up). Records guide overlays.
@@ -855,7 +973,8 @@ function migratePart(part){
     delete nd.smooth;
   });
 }
-function normalizeAllParts(){ if (!project.texts) project.texts=[]; for (const p of project.parts){ if (!p.notches) p.notches=[]; if (p.stitch==null) p.stitch=0; if (p.group===undefined) p.group=null; if (p.name==null) p.name=""; if (!p.color) p.color="#2563eb"; migratePart(p); } }
+function normalizeAllParts(){ if (!project.texts) project.texts=[]; for (const p of project.parts){ if (!p.notches) p.notches=[]; if (p.stitch==null) p.stitch=0; if (p.group===undefined) p.group=null; if (p.name==null) p.name=""; if (!p.color) p.color="#2563eb"; migratePart(p); }
+  for (const t of project.texts){ if (t.group===undefined) t.group=null; if (!t.font) t.font="gothic"; if (t.bold===undefined) t.bold=false; } }
 function bezierAt(seg, u){
   const mu = 1-u;
   return {
@@ -1040,7 +1159,18 @@ function updateContextBar(){
   document.getElementById("ctx-common").classList.add("show");
   document.getElementById("ctx-edit").classList.toggle("show", tool==="select");
   document.getElementById("ctx-shape").classList.toggle("show", tool==="rect" || tool==="ellipse");
-  document.getElementById("ctx-text").classList.toggle("show", tool==="text");
+  const textCtxOn = (tool==="text") || (tool==="select" && selTexts.length>0);
+  document.getElementById("ctx-text").classList.toggle("show", textCtxOn);
+  if (tool==="select" && selTexts.length){          // 選択中の文字の設定を表示に反映
+    const t = project.texts.find(x=>x.id===selTexts[0]);
+    if (t && document.activeElement !== document.getElementById("text-size")){
+      document.getElementById("text-font").value = t.font || "gothic";
+      document.getElementById("text-size").value = t.size || 20;
+      document.getElementById("text-color").value = t.color || "#111827";
+      document.getElementById("text-bold").checked = !!t.bold;
+      document.getElementById("text-vertical").checked = !!t.vertical;
+    }
+  }
   document.getElementById("ctx-stitch").classList.toggle("show", tool==="stitch");
 }
 function updateActionBar(){
@@ -1137,13 +1267,24 @@ function renderSelection(){
     }
   }
   // selected text
-  if (selTextId){
-    const t = project.texts.find(x=>x.id===selTextId);
+  for (const tid of selTexts){
+    const t = project.texts.find(x=>x.id===tid);
     if (t){
       const b = textBox(t);
       const p0 = worldToScreen({x:b.x0,y:b.y0}), p1 = worldToScreen({x:b.x1,y:b.y1});
       frag.appendChild(mk("rect", { x:Math.min(p0.x,p1.x)-3, y:Math.min(p0.y,p1.y)-3,
         width:Math.abs(p1.x-p0.x)+6, height:Math.abs(p1.y-p0.y)+6, class:"text-sel" }));
+    }
+  }
+  // 選択範囲の枠と拡大縮小ハンドル
+  if (showResizeBox()){
+    const b = selBoundsPadded();
+    const p0 = worldToScreen({x:b.x0,y:b.y0}), p1 = worldToScreen({x:b.x1,y:b.y1});
+    frag.appendChild(mk("rect", { x:Math.min(p0.x,p1.x), y:Math.min(p0.y,p1.y),
+      width:Math.abs(p1.x-p0.x), height:Math.abs(p1.y-p0.y), class:"sel-box" }));
+    for (const h of resizeHandles()){
+      const s2 = worldToScreen(h);
+      frag.appendChild(mk("rect", { x:s2.x-4.5, y:s2.y-4.5, width:9, height:9, class:"sel-grip" }));
     }
   }
   // grabbable edge under the cursor
@@ -1399,7 +1540,7 @@ function updateHint(){
 
   } else if (tool==="select"){
     msg += multiSel.length
-      ? " ・ 白い■=点をドラッグ / オレンジ●=辺の中央、つかむと辺ごと動く / ダブルクリック=角↔曲線 / Shift+クリック=点追加 / 右クリック=色・削除"
+      ? " ・ 枠の□をドラッグ=まとめて拡大縮小（Shiftで縦横比を保つ）/ 白い■=点 / オレンジ●=辺 / ダブルクリック=角↔曲線 / 右クリック=色・削除"
       : " ・ パーツ/文字をクリックで選択（文字はダブルクリックで編集）・ 空きをドラッグで囲んで選択";
   } else if (tool==="notch"){
     msg += " ・ 輪郭付近をクリックで合印を追加 / 右クリックで削除";
@@ -1565,7 +1706,7 @@ function setTool(t){
   if (typeof filletReset==="function") filletReset();
   tool = t;
   if (t!=="select"){ multiSel = []; marquee = null; selMove = null; }
-  if (t!=="select" && t!=="text") selTextId = null;
+  if (t!=="select" && t!=="text") selTexts = [];
   document.querySelectorAll("button.tool").forEach(b=>b.classList.toggle("active", b.dataset.tool===t));
   // the 図形 (shape) button stands in for rect/ellipse
   const shapeBtn = document.getElementById("tool-shape");
@@ -1627,12 +1768,14 @@ svg.addEventListener("mousedown", (e)=>{
   if (tool==="text"){
     if (editingTextId!=null) commitTextEditor();
     const hit = findTextAt(wp);
-    if (hit){ selTextId = hit.id; textDrag = { id:hit.id, startW:wp, ox:hit.x, oy:hit.y, moved:false, editOnClick:true }; }
+    if (hit){ selTexts = [hit.id]; textDrag = { id:hit.id, startW:wp, ox:hit.x, oy:hit.y, moved:false, editOnClick:true }; }
     else {
       const t = { id:"t"+(idCounter++), x:Math.round(wp.x), y:Math.round(wp.y), text:"",
                   size: parseFloat(document.getElementById("text-size").value)||20,
                   color: document.getElementById("text-color").value || "#111827",
-                  vertical: document.getElementById("text-vertical").checked };
+                  vertical: document.getElementById("text-vertical").checked,
+                  font: document.getElementById("text-font").value,
+                  bold: document.getElementById("text-bold").checked, group:null };
       project.texts.push(t);
       openTextEditor(t, true);
     }
@@ -1650,18 +1793,47 @@ svg.addEventListener("mousedown", (e)=>{
     // 文字を最優先で拾う（クリックで選択、ドラッグで移動、ダブルクリックで編集）
     const ht = findTextAt(wp);
     if (ht){
-      selTextId = ht.id; selectedPartId = null; multiSel = []; selVertex = null;
       const now = Date.now();
       if (lastTClick.id===ht.id && (now - lastTClick.t) < 400){
         lastTClick = { id:null, t:0 }; render(); openTextEditor(ht, false); return;
       }
       lastTClick = { id:ht.id, t:now };
+      // すでに複数選択の一部なら、その選択をまとめて動かす
+      const inSel = selTexts.includes(ht.id);
+      const spanning = multiSel.length>0 || selTexts.length>1;
+      if (inSel && spanning){
+        selectedPartId = selectedPartId || null; selVertex = null;
+        selMove = { startW: wp,
+          orig: multiSel.map(m=>{ const nd=nodeOf(m); return { partId:m.partId, idx:m.idx, x:nd.x, y:nd.y }; }),
+          origTexts: selTexts.map(id=>{ const t=project.texts.find(x=>x.id===id); return t?{id,x:t.x,y:t.y}:null; }).filter(Boolean) };
+        render(); return;
+      }
+      // グループに属する文字なら、そのグループごと選ぶ
+      if (ht.group){
+        const gp = project.parts.filter(p=>p.group===ht.group);
+        const gt = project.texts.filter(t=>t.group===ht.group).map(t=>t.id);
+        multiSel = []; gp.forEach(p=>p.nodes.forEach((_,i)=>multiSel.push({partId:p.id, idx:i})));
+        selTexts = gt; selectedPartId = gp.length?gp[0].id:null; selVertex = null; selMode = "part";
+        selMove = { startW: wp,
+          orig: multiSel.map(m=>{ const nd=nodeOf(m); return { partId:m.partId, idx:m.idx, x:nd.x, y:nd.y }; }),
+          origTexts: selTexts.map(id=>{ const t=project.texts.find(x=>x.id===id); return t?{id,x:t.x,y:t.y}:null; }).filter(Boolean) };
+        render(); return;
+      }
+      selTexts = [ht.id]; selectedPartId = null; multiSel = []; selVertex = null;
       textDrag = { id:ht.id, startW:wp, ox:ht.x, oy:ht.y, moved:false, editOnClick:false };
       render(); return;
     }
-    selTextId = null;
-    const startMove = (list)=>{ multiSel = list; selMove = { startW: wp, orig: list.map(m=>{ const nd=nodeOf(m); return { partId:m.partId, idx:m.idx, x:nd.x, y:nd.y }; }) }; };
+    const startMove = (list, textIds)=>{
+      multiSel = list;
+      if (textIds !== undefined) selTexts = textIds;
+      selMove = { startW: wp,
+        orig: list.map(m=>{ const nd=nodeOf(m); return { partId:m.partId, idx:m.idx, x:nd.x, y:nd.y }; }),
+        origTexts: selTexts.map(id=>{ const t=project.texts.find(x=>x.id===id); return t?{id, x:t.x, y:t.y}:null; }).filter(Boolean) };
+    };
 
+    // 0) 拡大縮小ハンドル（選択範囲の枠）を最優先
+    const rh = findResizeHandleAt(sp);
+    if (rh){ beginScale(rh, wp); render(); return; }
     // 1) ベジェハンドル：曲線の曲がり具合を調整
     const h = findHandleAt(sp);
     if (h && !e.shiftKey){
@@ -1707,15 +1879,25 @@ svg.addEventListener("mousedown", (e)=>{
     // 5) パーツ／線をクリック：まるごと選択（グループなら全部）
     const part = findPartAt(wp) || findLinePartAt(wp);
     if (part){
+      // すでに複数選択されている中のパーツを掴んだら、選択はそのままで全部動かす
+      const inSel = multiSel.some(m=>m.partId===part.id);
+      const spanning = new Set(multiSel.map(m=>m.partId)).size > 1 || selTexts.length > 0;
+      if (inSel && spanning){
+        selectedPartId = part.id; selVertex = null;
+        startMove(multiSel);
+        render(); return;
+      }
       selectedPartId = part.id; selVertex = null; selMode = "part";
-      const groupParts = part.group ? project.parts.filter(p=>p.group===part.group) : [part];
+      const g = part.group;
+      const groupParts = g ? project.parts.filter(p=>p.group===g) : [part];
+      const groupTexts = g ? project.texts.filter(t=>t.group===g).map(t=>t.id) : [];
       const list = [];
       for (const gp of groupParts) gp.nodes.forEach((_,i)=>list.push({ partId:gp.id, idx:i }));
-      startMove(list);
+      startMove(list, groupTexts);
       render(); return;
     }
     // 6) 空き：範囲選択
-    multiSel = []; selectedPartId = null; selVertex = null; selMode = "points";
+    multiSel = []; selectedPartId = null; selVertex = null; selMode = "points"; selTexts = [];
     marquee = { x0:sp.x, y0:sp.y, x1:sp.x, y1:sp.y };
     render(); return;
   }
@@ -1790,10 +1972,12 @@ svg.addEventListener("mousemove", (e)=>{
   }
   // Rectangle / ellipse preview while dragging
   if (shapeDrag){ renderThrottled(); return; }
+  if (scaleDrag){ applyScale(e.shiftKey); return; }
   // Selection tool: dragging a marquee, or moving the selected points
   if (marquee){
     marquee.x1 = sp.x; marquee.y1 = sp.y;
     multiSel = pointsInRect(marquee.x0, marquee.y0, marquee.x1, marquee.y1);
+    selTexts = textsInRect(marquee.x0, marquee.y0, marquee.x1, marquee.y1);
     renderThrottled();
     return;
   }
@@ -1806,6 +1990,7 @@ svg.addEventListener("mousemove", (e)=>{
     const adj = magnetAdjust(selMove.orig, dwx, dwy);   // snap to other parts' corners/edges
     dwx = adj.dwx; dwy = adj.dwy;
     for (const o of selMove.orig){ const nd = nodeOf(o); if (nd){ nd.x = o.x + dwx; nd.y = o.y + dwy; } }
+    for (const o of (selMove.origTexts||[])){ const t = project.texts.find(x=>x.id===o.id); if (t){ t.x = o.x + dwx; t.y = o.y + dwy; } }
     renderThrottled();
     return;
   }
@@ -1860,7 +2045,8 @@ window.addEventListener("mouseup", ()=>{
     }
     shapeDrag = null;
   }
-  if (drag || handleDrag || selMove){ saveLocal(); }
+  if (drag || handleDrag || selMove || scaleDrag){ saveLocal(); }
+  scaleDrag = null;
   drag = null; panning = null; penDrag = null; handleDrag = null; selMove = null; marquee = null; snapGuides = []; hoverEdge = null;
   commitGesture();
   render();
@@ -1991,8 +2177,7 @@ window.addEventListener("keydown", (e)=>{
   if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="c"){ e.preventDefault(); copySelection(); return; }
   if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="v"){ e.preventDefault(); pasteClipboard(); return; }
   if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="x"){ e.preventDefault();
-    if (copySelection()){ if (selTextId){ pushUndo(); project.texts=project.texts.filter(t=>t.id!==selTextId); selTextId=null; saveLocal(); render(); }
-                          else deleteSelection(); } return; }
+    if (copySelection()){ deleteSelection(); } return; }
   // tool keyboard shortcuts (Affinity-style)
   if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length===1){
     const map = { v:"select", p:"draw", t:"text", r:"rect", o:"ellipse", e:"select", n:"notch", h:"pan", s:"stitch", a:"arrow", d:"dim" };
@@ -2000,17 +2185,13 @@ window.addEventListener("keydown", (e)=>{
     if (map[k]){ e.preventDefault(); setTool(map[k]); return; }
   }
   const drawing = (tool==="draw"||tool==="stitch") && draft;
-  if (e.key==="Escape" && !drawing){ selectedPartId=null; multiSel=[]; selVertex=null; marquee=null; selTextId=null; render(); }
+  if (e.key==="Escape" && !drawing){ selectedPartId=null; multiSel=[]; selVertex=null; marquee=null; selTexts=[]; render(); }
   if (drawing){
     if (e.key==="Enter") commitDraft();
     else if (e.key==="Escape") cancelDraft();
     else if (e.key==="Backspace"){ e.preventDefault(); draft.nodes.pop(); if(!draft.nodes.length) draft=null; render(); }
   }
-  if ((e.key==="Delete"||e.key==="Backspace") && tool==="select" && selTextId){
-    e.preventDefault(); pushUndo();
-    project.texts = project.texts.filter(t=>t.id!==selTextId);
-    selTextId = null; saveLocal(); render(); return;
-  }
+
   if ((e.key==="Delete"||e.key==="Backspace") && tool==="select" && multiSel.length){
     e.preventDefault(); deleteSelection(); return;
   }
@@ -2211,19 +2392,34 @@ textEditorEl.addEventListener("keydown", (e)=>{
   else if (e.key==="Escape"){ e.preventDefault(); cancelTextEditor(); }
 });
 textEditorEl.addEventListener("blur", ()=>{ if (editingTextId!=null) commitTextEditor(); });
-// size / color / 縦書き apply live to the text being edited
-["text-size","text-color","text-vertical"].forEach(id=>{
-  document.getElementById(id).addEventListener("input", ()=>{
-    if (editingTextId==null) return;
-    const t = project.texts.find(x=>x.id===editingTextId); if (!t) return;
-    t.size = parseFloat(document.getElementById("text-size").value) || t.size;
-    t.color = document.getElementById("text-color").value;
-    t.vertical = document.getElementById("text-vertical").checked;
-    const ed = document.getElementById("text-editor");
-    ed.style.fontSize = Math.max(11, t.size*view.scale) + "px";
-    ed.style.color = t.color;
-    saveLocal(); render();
-  });
+// 字体・大きさ・色・太字・縦書き：選択中の文字（複数可）／編集中の文字にその場で反映
+function applyTextProps(){
+  const font = document.getElementById("text-font").value;
+  const size = parseFloat(document.getElementById("text-size").value);
+  const color = document.getElementById("text-color").value;
+  const bold = document.getElementById("text-bold").checked;
+  const vertical = document.getElementById("text-vertical").checked;
+  const targets = [];
+  if (editingTextId!=null){ const t=project.texts.find(x=>x.id===editingTextId); if(t) targets.push(t); }
+  for (const id of selTexts){ const t=project.texts.find(x=>x.id===id); if(t && !targets.includes(t)) targets.push(t); }
+  if (!targets.length) return;                       // 選択が無ければ「次に作る文字」の設定として残るだけ
+  for (const t of targets){
+    t.font=font; t.color=color; t.bold=bold; t.vertical=vertical;
+    if (size>0) t.size=size;
+  }
+  if (editingTextId!=null){
+    const t=project.texts.find(x=>x.id===editingTextId);
+    const ed=document.getElementById("text-editor");
+    if (t){ ed.style.fontSize=Math.max(11,t.size*view.scale)+"px"; ed.style.color=t.color;
+            ed.style.fontFamily=fontOf(t); ed.style.fontWeight=t.bold?"700":"400"; }
+  }
+  saveLocal(); render();
+}
+["text-font","text-size","text-color","text-bold","text-vertical"].forEach(id=>{
+  const el=document.getElementById(id);
+  el.addEventListener("focus", ()=>{ if (selTexts.length||editingTextId!=null) pushUndo(); });
+  el.addEventListener("input", applyTextProps);
+  el.addEventListener("change", applyTextProps);
 });
 
 document.getElementById("btn-save").addEventListener("click", ()=>{
