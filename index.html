@@ -75,7 +75,7 @@
   svg.mode-dim { cursor: crosshair; }
   svg.mode-select { cursor: default; }
   svg.mode-notch { cursor: cell; }
-  svg.mode-pan { cursor: grab; }
+  svg.panning { cursor: grabbing !important; }   /* 右ドラッグ中はどのツールでも掴んだ形 */
   /* current-mode badge (always visible, top-left) */
   #mode-badge {
     position: absolute; right: 10px; top: 10px; z-index: 6;
@@ -276,7 +276,6 @@
 
   <div id="main">
     <div id="toolpanel">
-      <button class="tool" data-tool="pan" id="tool-pan" title="移動 (H)"><span class="ic">✋</span><span class="tl">移動</span></button>
       <button class="tool active" data-tool="select" id="tool-select" title="選択・編集 (V)"><span class="ic">⬚</span><span class="tl">選択</span></button>
       <span class="tp-sep"></span>
       <button class="tool" data-tool="draw" id="tool-draw" title="ペン (P)"><span class="ic">✏️</span><span class="tl">ペン</span></button>
@@ -331,7 +330,9 @@
         ・オレンジ●（辺の中央）をドラッグ＝辺ごと動く<br>
         ・点をダブルクリック＝角↔曲線<br>
         ・Shift+クリック＝点を追加<br>
-        ・<b>右クリック＝色の変更・複製・削除</b>
+        ・<b>右クリック＝色の変更・複製・削除</b><br><br>
+        <b>画面を動かす</b>：どのツール中でも<b>右ドラッグ</b><br>
+        （ホイールで拡大縮小）
       </p>
     </div>
   </div>
@@ -384,6 +385,7 @@ let selectedPartId = null;
 let draft = null;           // {nodes:[{x,y}]}
 let drag = null;            // {partId, index} while dragging a vertex
 let panning = null;         // {x,y,tx,ty}
+let rightPan = null;        // 右ボタン押下中 {x,y,tx,ty,moved} — 動かせばパン、動かなければメニュー
 let mouseWorld = {x:0, y:0};
 let idCounter = 1;
 let lastVClick = { id:null, idx:-1, t:0 };  // for manual double-click (round/corner)
@@ -1146,14 +1148,14 @@ const MODE_INFO = {
   arrow:   { icon:"↗",  name:"矢印モード" },
   dim:     { icon:"📏", name:"寸法線モード" },
   select:  { icon:"⬚",  name:"選択・編集モード" },
-  notch:   { icon:"⊹",  name:"合印モード" },
-  pan:     { icon:"✋",  name:"移動モード" }
+  notch:   { icon:"⊹",  name:"合印モード" }
 };
 function updateModeBadge(){
   const m = MODE_INFO[tool] || { icon:"", name:tool };
   const badge = document.getElementById("mode-badge");
   badge.textContent = `${m.icon} ${m.name}`;
-  svg.setAttribute("class", "mode-" + tool);
+  // panning は描画のたびに消さない（右ドラッグ中のカーソルを保つ）
+  svg.setAttribute("class", "mode-" + tool + (panning ? " panning" : ""));
 }
 function updateContextBar(){
   document.getElementById("ctx-common").classList.add("show");
@@ -1544,8 +1546,6 @@ function updateHint(){
       : " ・ パーツ/文字をクリックで選択（文字はダブルクリックで編集）・ 空きをドラッグで囲んで選択";
   } else if (tool==="notch"){
     msg += " ・ 輪郭付近をクリックで合印を追加 / 右クリックで削除";
-  } else if (tool==="pan"){
-    msg += " ・ ドラッグで画面移動";
   }
   hint.textContent = msg;
 }
@@ -1736,13 +1736,18 @@ function cancelDraft(){ draft = null; render(); }
 
 // ===== Event handling =====
 svg.addEventListener("mousedown", (e)=>{
-  if (e.button===2) return; // right-click handled by contextmenu
   svgRect = svg.getBoundingClientRect();   // toolbar height can change -> refresh once per gesture
+  if (e.button===2 || (e.button===0 && e.ctrlKey)){   // Macのcontrol+クリックも右クリック扱い
+    // 右ボタン: 動かせば画面移動、動かさずに離せばメニュー（判定は mouseup で）
+    const s = svgPoint(e);
+    rightPan = { x:s.x, y:s.y, tx:view.tx, ty:view.ty, moved:false };
+    return;
+  }
   const sp = svgPoint(e);
   const wp = screenToWorld(sp.x, sp.y);
   gestureSnap = snap(); // remember state so the whole gesture becomes one undo step
 
-  if (tool==="pan" || e.button===1){  // 移動ツール or 中ボタンで画面移動（Altは曲線ハンドルの左右独立用に確保）
+  if (e.button===1){  // 中ボタンでも画面移動（Altは曲線ハンドルの左右独立用に確保）
     panning = { x: sp.x, y: sp.y, tx: view.tx, ty: view.ty };
     return;
   }
@@ -1936,6 +1941,13 @@ svg.addEventListener("mousedown", (e)=>{
 svg.addEventListener("mousemove", (e)=>{
   const sp = svgPoint(e);
   mouseWorld = screenToWorld(sp.x, sp.y);
+  // 右ボタンを押したまま一定以上動かしたら画面移動を開始
+  if (rightPan && !rightPan.moved && Math.hypot(sp.x-rightPan.x, sp.y-rightPan.y) > 4){
+    rightPan.moved = true;
+    panning = { x: rightPan.x, y: rightPan.y, tx: rightPan.tx, ty: rightPan.ty };
+    hideContextMenu();
+    svg.classList.add("panning");
+  }
   if (panning){
     view.tx = panning.tx + (sp.x - panning.x);
     view.ty = panning.ty + (sp.y - panning.y);
@@ -2012,7 +2024,15 @@ svg.addEventListener("mousemove", (e)=>{
   }
 });
 
-window.addEventListener("mouseup", ()=>{
+window.addEventListener("mouseup", (e)=>{
+  // 右ボタンを離した: 動かしていなければメニュー、動かしていたら移動しただけ
+  if (rightPan){   // ボタン番号ではなく状態で判定（control+クリックは button 0 で来るため）
+    const moved = rightPan.moved, at = { x: rightPan.x, y: rightPan.y };
+    rightPan = null; panning = null; svg.classList.remove("panning");
+    if (moved){ saveLocal(); render(); }
+    else openContextMenu(at);
+    return;
+  }
   // Only act when a canvas gesture was actually in progress. Without this, a plain
   // click in the sidebar also ran render(), rebuilding the parts list and destroying
   // the input the user just clicked (and cancelling a row drag).
@@ -2058,10 +2078,11 @@ svg.addEventListener("dblclick", (e)=>{
 });
 
 // Right-click: delete a notch / vertex if pointing at one; otherwise show the menu
-svg.addEventListener("contextmenu", (e)=>{
-  e.preventDefault();
-  svgRect = svg.getBoundingClientRect();
-  const sp = svgPoint(e);
+// macOS はマウスを押した時点で contextmenu が飛んでくるので、ここでは開かない。
+// 右ドラッグ＝画面移動と区別するため、実際に開くのは mouseup（openContextMenu）。
+svg.addEventListener("contextmenu", (e)=>{ e.preventDefault(); });
+
+function openContextMenu(sp){
   // Remove a notch if right-clicking near one (any tool)
   for (const part of project.parts){
     if (!part.notches) continue;
@@ -2087,7 +2108,7 @@ svg.addEventListener("contextmenu", (e)=>{
   if (txt || obj){ showObjectMenu(sp.x, sp.y, obj, txt); return; }
   // otherwise: the file/view menu
   showFileMenu(sp.x, sp.y);
-});
+}
 let ctxTarget = null;   // { part } or { text } the object menu is acting on
 function placeMenu(m, x, y){
   m.style.left = x + "px"; m.style.top = y + "px"; m.classList.add("show");
@@ -2180,7 +2201,7 @@ window.addEventListener("keydown", (e)=>{
     if (copySelection()){ deleteSelection(); } return; }
   // tool keyboard shortcuts (Affinity-style)
   if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length===1){
-    const map = { v:"select", p:"draw", t:"text", r:"rect", o:"ellipse", e:"select", n:"notch", h:"pan", s:"stitch", a:"arrow", d:"dim" };
+    const map = { v:"select", p:"draw", t:"text", r:"rect", o:"ellipse", e:"select", n:"notch", s:"stitch", a:"arrow", d:"dim" };
     const k = e.key.toLowerCase();
     if (map[k]){ e.preventDefault(); setTool(map[k]); return; }
   }
