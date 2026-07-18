@@ -188,10 +188,45 @@
   #context-menu .cm-colors .chip:hover { transform: scale(1.2); }
   #context-menu .cm-sep { height: 1px; background: #4b5563; margin: 4px 0; }
 
+  /* ---- 印刷プレビュー ---- */
+  #print-back { display:none; position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:60; }
+  #print-back.show { display:block; }
+  #print-dlg { display:none; position:fixed; z-index:61; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:min(940px, 94vw); height:min(660px, 92vh); background:#fff; border-radius:10px;
+    box-shadow:0 20px 60px rgba(0,0,0,.35); flex-direction:column; overflow:hidden; }
+  #print-dlg.show { display:flex; }
+  #print-dlg .pd-head { background:#1f2937; color:#fff; padding:9px 12px; font-size:14px; font-weight:600;
+    display:flex; align-items:center; justify-content:space-between; }
+  #print-dlg .pd-head button { background:none; border:none; color:#cbd5e1; font-size:15px; cursor:pointer; padding:2px 6px; }
+  #print-dlg .pd-head button:hover { color:#fff; }
+  #print-dlg .pd-body { display:flex; flex:1; min-height:0; }
+  #print-dlg .pd-paper { flex:1; background:#e5e7eb; display:flex; align-items:center; justify-content:center; padding:16px; min-width:0; }
+  #pd-view { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.25); line-height:0; }
+  #pd-view .pd-margin { fill:none; stroke:#cbd5e1; stroke-width:1; stroke-dasharray:6 5; }
+  #print-dlg .pd-side { width:250px; flex:none; border-left:1px solid #e5e7eb; padding:12px; overflow-y:auto;
+    display:flex; flex-direction:column; gap:9px; font-size:13px; }
+  #print-dlg .pd-side label { display:flex; flex-direction:column; gap:3px; color:#374151; }
+  #print-dlg .pd-side label.pd-chk { flex-direction:row; align-items:center; gap:6px; }
+  #print-dlg .pd-side select, #print-dlg .pd-side input[type=number] {
+    border:1px solid #d1d5db; border-radius:6px; padding:5px 6px; font-size:13px; background:#fff; }
+  #pd-info { background:#f3f4f6; border-radius:6px; padding:8px; font-size:12px; color:#374151; line-height:1.7; }
+  #pd-warn { color:#b91c1c; font-size:12px; line-height:1.6; }
+  #pd-warn:empty { display:none; }
+  #print-dlg .pd-go { margin-top:auto; background:#2563eb; color:#fff; border:none; border-radius:7px;
+    padding:10px; font-size:14px; font-weight:600; cursor:pointer; }
+  #print-dlg .pd-go:hover { background:#1d4ed8; }
+  #print-sheet { display: none; }
+
   @media print {
-    #toolbar, #toolpanel, #sidebar, #hint, #mode-badge, #context-menu { display: none !important; }
+    #toolbar, #toolpanel, #sidebar, #hint, #mode-badge, #context-menu, #print-dlg, #print-back { display: none !important; }
     body { background: #fff; }
     .grid-line, .axis { display: none; }
+    /* プレビューから印刷したときは、組み上げた紙面だけを刷る */
+    body.printing-sheet #main { display: none !important; }
+    /* 画面用の body は overflow:hidden の flex なので、そのままだと紙面が切れる */
+    body.printing-sheet { display: block; overflow: visible; height: auto; width: auto; margin: 0; }
+    body.printing-sheet #print-sheet { display: block !important; position: absolute; left: 0; top: 0; }
+    body.printing-sheet #print-sheet svg { display: block; }
   }
 </style>
 </head>
@@ -274,6 +309,41 @@
     <input type="file" id="file-input" accept=".json" style="display:none">
   </div>
 
+  <!-- 印刷プレビュー -->
+  <div id="print-back"></div>
+  <div id="print-dlg" role="dialog" aria-label="印刷プレビュー">
+    <div class="pd-head">🖨 印刷プレビュー<button id="pd-x" title="閉じる">✕</button></div>
+    <div class="pd-body">
+      <div class="pd-paper"><div id="pd-view"></div></div>
+      <div class="pd-side">
+        <label>用紙サイズ
+          <select id="pd-paper">
+            <option value="A4" selected>A4（210×297mm）</option>
+            <option value="A3">A3（297×420mm）</option>
+            <option value="A5">A5（148×210mm）</option>
+            <option value="B4">B4（257×364mm）</option>
+            <option value="B5">B5（182×257mm）</option>
+            <option value="letter">レター（216×279mm）</option>
+          </select>
+        </label>
+        <label>向き
+          <select id="pd-orient">
+            <option value="auto" selected>自動（大きく写る方）</option>
+            <option value="portrait">縦</option>
+            <option value="landscape">横</option>
+          </select>
+        </label>
+        <label>余白 <input type="number" id="pd-margin" value="10" min="0" max="50" step="1"> mm</label>
+        <label class="pd-chk"><input type="checkbox" id="pd-title"> 図面名を上に入れる</label>
+        <div id="pd-info"></div>
+        <div id="pd-warn"></div>
+        <button id="pd-print" class="pd-go">🖨 この内容で印刷</button>
+      </div>
+    </div>
+  </div>
+  <div id="print-sheet"></div>
+  <style id="print-page-style"></style>
+
   <div id="main">
     <div id="toolpanel">
       <button class="tool active" data-tool="select" id="tool-select" title="選択・編集 (V)"><span class="ic">⬚</span><span class="tl">選択</span></button>
@@ -331,7 +401,7 @@
         ・点をダブルクリック＝角↔曲線<br>
         ・Shift+クリック＝点を追加<br>
         ・<b>右クリック＝色の変更・複製・削除</b><br><br>
-        <b>画面を動かす</b>：どのツール中でも<b>右ドラッグ</b><br>
+        <b>画面を動かす</b>：<b>右ドラッグ</b>／<b>control を押しながら指を動かす</b><br>
         （ホイールで拡大縮小）
       </p>
     </div>
@@ -386,6 +456,8 @@ let draft = null;           // {nodes:[{x,y}]}
 let drag = null;            // {partId, index} while dragging a vertex
 let panning = null;         // {x,y,tx,ty}
 let rightPan = null;        // 右ボタン押下中 {x,y,tx,ty,moved} — 動かせばパン、動かなければメニュー
+let ctrlPan = null;         // control を押しているだけで画面移動中 {x,y}（トラックパッド用）
+function endCtrlPan(){ if (!ctrlPan) return; ctrlPan = null; svg.classList.remove("panning"); saveLocal(); }
 let mouseWorld = {x:0, y:0};
 let idCounter = 1;
 let lastVClick = { id:null, idx:-1, t:0 };  // for manual double-click (round/corner)
@@ -1155,7 +1227,7 @@ function updateModeBadge(){
   const badge = document.getElementById("mode-badge");
   badge.textContent = `${m.icon} ${m.name}`;
   // panning は描画のたびに消さない（右ドラッグ中のカーソルを保つ）
-  svg.setAttribute("class", "mode-" + tool + (panning ? " panning" : ""));
+  svg.setAttribute("class", "mode-" + tool + ((panning || ctrlPan) ? " panning" : ""));
 }
 function updateContextBar(){
   document.getElementById("ctx-common").classList.add("show");
@@ -1941,6 +2013,19 @@ svg.addEventListener("mousedown", (e)=>{
 svg.addEventListener("mousemove", (e)=>{
   const sp = svgPoint(e);
   mouseWorld = screenToWorld(sp.x, sp.y);
+  // control を押しているだけ（押し込み不要）で画面移動 — トラックパッド用
+  if (e.ctrlKey && e.buttons===0 && !rightPan && !panning && !drag && !penDrag && !handleDrag && !selMove && !shapeDrag && !textDrag && !scaleDrag && !marquee){
+    if (ctrlPan){                       // 2回目以降: 前回からの差分だけ動かす
+      view.tx += sp.x - ctrlPan.x;
+      view.ty += sp.y - ctrlPan.y;
+      renderThrottled();
+    } else {                            // 押し始めは基準点を覚えるだけ（いきなり飛ばない）
+      svg.classList.add("panning");
+    }
+    ctrlPan = { x: sp.x, y: sp.y };
+    return;
+  }
+  if (ctrlPan) endCtrlPan();
   // 右ボタンを押したまま一定以上動かしたら画面移動を開始
   if (rightPan && !rightPan.moved && Math.hypot(sp.x-rightPan.x, sp.y-rightPan.y) > 4){
     rightPan.moved = true;
@@ -2072,6 +2157,11 @@ window.addEventListener("mouseup", (e)=>{
   render();
 });
 
+// control を離したら（マウスを動かさなくても）画面移動を終える
+window.addEventListener("keyup", (e)=>{ if (e.key==="Control") endCtrlPan(); });
+window.addEventListener("blur", ()=>{ endCtrlPan(); });
+svg.addEventListener("mouseleave", ()=>{ endCtrlPan(); });
+
 svg.addEventListener("dblclick", (e)=>{
   if (tool==="draw" && draft && draft.nodes.length>=3){ e.preventDefault(); commitDraft(); }
   else if (tool==="stitch" && draft && draft.nodes.length>=2){ e.preventDefault(); commitDraft(); }
@@ -2156,7 +2246,7 @@ document.getElementById("context-menu").addEventListener("click", (e)=>{
   if (cmd==="fit") fitView();
   else if (cmd==="save") document.getElementById("btn-save").click();
   else if (cmd==="load") document.getElementById("btn-load").click();
-  else if (cmd==="print") window.print();
+  else if (cmd==="print") openPrintDialog();
   else if (cmd==="delobj" && ctxTarget){
     pushUndo();
     if (ctxTarget.text) project.texts = project.texts.filter(t=>t.id!==ctxTarget.text.id);
@@ -2193,6 +2283,12 @@ svg.addEventListener("wheel", (e)=>{
 
 window.addEventListener("keydown", (e)=>{
   if (e.target.tagName === "INPUT") return;
+  // 印刷プレビューを開いている間は、下の図面側のショートカットを効かせない
+  if (document.getElementById("print-dlg").classList.contains("show")){
+    if (e.key==="Escape"){ e.preventDefault(); closePrintDialog(); }
+    return;
+  }
+  if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="p"){ e.preventDefault(); openPrintDialog(); return; }
   if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="z"){ e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="y"){ e.preventDefault(); redo(); return; }
   if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="c"){ e.preventDefault(); copySelection(); return; }
@@ -2366,7 +2462,7 @@ function createShapeByDims(kind){
 }
 document.getElementById("btn-mk-rect").addEventListener("click", ()=>createShapeByDims("rect"));
 document.getElementById("btn-mk-ellipse").addEventListener("click", ()=>createShapeByDims("ellipse"));
-document.getElementById("btn-print").addEventListener("click", ()=>window.print());
+document.getElementById("btn-print").addEventListener("click", openPrintDialog);
 
 // ----- floating action bar (選択モード) -----
 document.getElementById("ab-rotl").addEventListener("click", ()=>{ const a=Math.abs(parseFloat(document.getElementById("ab-angle").value)||15); rotateSelection(-a); });
@@ -2377,6 +2473,162 @@ document.getElementById("ab-flipv").addEventListener("click", ()=>flipSelection(
 document.getElementById("ab-group").addEventListener("click", groupSelection);
 document.getElementById("ab-ungroup").addEventListener("click", ungroupSelection);
 document.getElementById("ab-del").addEventListener("click", deleteSelection);
+
+// ===== 印刷プレビュー =====
+// 紙のサイズを決めると、図面がその紙に収まるよう縮尺を自動で計算する。
+const PAPERS = { A4:[210,297], A3:[297,420], A5:[148,210], B4:[257,364], B5:[182,257], letter:[216,279] };
+const PD_PX = 4;                       // 紙面1mm = 4px（用紙座標の解像度）
+const pdEl = (id)=>document.getElementById(id);
+
+// 画面の入力から、紙面の寸法・縮尺・配置を決める
+function printPlan(){
+  const [pw0, ph0] = PAPERS[pdEl("pd-paper").value] || PAPERS.A4;
+  const margin = Math.min(50, Math.max(0, parseFloat(pdEl("pd-margin").value)||0));
+  const b = contentBounds();
+  const orientSel = pdEl("pd-orient").value;
+
+  // 縦横それぞれで「どれだけ大きく載るか」を出し、自動なら大きく写る方を選ぶ。
+  // ソファーの図面は1800mmなどザラなので、実寸印刷は狙わず常に用紙に合わせる。
+  const trial = (W,H)=>{
+    const cw = Math.max(1, W-2*margin), ch = Math.max(1, H-2*margin);
+    const k = b ? Math.min(cw/b.w, ch/b.h) : 1;
+    return { W, H, cw, ch, k };
+  };
+  const portrait = trial(pw0, ph0), landscape = trial(ph0, pw0);
+  const t = orientSel==="portrait" ? portrait
+          : orientSel==="landscape" ? landscape
+          : (landscape.k > portrait.k) ? landscape : portrait;
+
+  const k = t.k;
+  const dw = b ? b.w*k : 0, dh = b ? b.h*k : 0;         // 紙の上での図面の大きさ(mm)
+  return { b, margin, k, paperW:t.W, paperH:t.H, cw:t.cw, ch:t.ch, dw, dh,
+           landscape: t.W > t.H, paperName: pdEl("pd-paper").value };
+}
+// 縮尺を「1:5」「2:1」のような読みやすい文字にする
+function scaleLabel(k){
+  if (Math.abs(k-1) < 0.005) return "1:1（実寸）";
+  if (k < 1){ const n = 1/k; return "1:" + (n>=10 ? Math.round(n) : n.toFixed(1)); }
+  const n = k; return (n>=10 ? Math.round(n) : n.toFixed(1)) + ":1";
+}
+
+// 紙面のSVGを組み立てる。forPrint=true なら実寸(mm)、false ならプレビュー用のpxサイズ。
+function buildPrintSVG(plan, forPrint, previewPx){
+  const PW = plan.paperW*PD_PX, PH = plan.paperH*PD_PX;
+  // 画面用のviewを一時的に紙面用へ差し替えて描き、その結果を借りる
+  const sv = { ...view }, svp = [vpW, vpH];
+  const ssel = selectedPartId, sms = multiSel, sst = selTexts, sdraft = draft;
+  selectedPartId = null; multiSel = []; selTexts = []; draft = null;
+  vpW = PW; vpH = PH;
+  view.scale = PD_PX * plan.k;
+  if (plan.b){
+    view.tx = (plan.margin + (plan.cw - plan.dw)/2)*PD_PX - plan.b.minx*view.scale;
+    view.ty = (plan.margin + (plan.ch - plan.dh)/2)*PD_PX - plan.b.miny*view.scale;
+  } else { view.tx = 0; view.ty = 0; }
+  suppressListRender = true;
+  renderParts(); renderTexts();
+  // marker の id が本体と重ならないよう振り替える
+  const body = (gParts.innerHTML + gTexts.innerHTML).replace(/url\(#arrowhead\)/g, "url(#pd-arrowhead)");
+  suppressListRender = false;
+  view = sv; vpW = svp[0]; vpH = svp[1];
+  selectedPartId = ssel; multiSel = sms; selTexts = sst; draft = sdraft;
+  render();
+
+  const F = 3.6*PD_PX;                                   // 注記の文字サイズ（3.6mm）
+  const name = (project.name || "").trim();
+  const parts = [];
+  if (!forPrint){                                        // プレビューだけ余白の目安を点線で
+    parts.push(`<rect class="pd-margin" x="${plan.margin*PD_PX}" y="${plan.margin*PD_PX}" width="${plan.cw*PD_PX}" height="${plan.ch*PD_PX}"></rect>`);
+  }
+  if (pdEl("pd-title").checked && name){
+    parts.push(`<text x="${plan.margin*PD_PX}" y="${Math.max(plan.margin*PD_PX-4, F)}" font-size="${F*1.15}" font-weight="700" fill="#111827" font-family='${FONTS.gothic.replace(/"/g,"&quot;")}'>${escapeHtml(name)}</text>`);
+  }
+  const size = forPrint
+    ? `width="${plan.paperW}mm" height="${plan.paperH}mm"`
+    : `width="${previewPx.w}" height="${previewPx.h}"`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PW} ${PH}" ${size}>
+    <defs><marker id="pd-arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="context-stroke"></path></marker></defs>
+    <rect x="0" y="0" width="${PW}" height="${PH}" fill="#ffffff"></rect>
+    ${parts.join("")}
+    ${body}
+  </svg>`;
+}
+
+function refreshPrintPreview(){
+  const plan = printPlan();
+  // プレビュー枠に収まる大きさを出す
+  const box = document.querySelector("#print-dlg .pd-paper");
+  const availW = Math.max(120, box.clientWidth - 32), availH = Math.max(120, box.clientHeight - 32);
+  const s = Math.min(availW/plan.paperW, availH/plan.paperH);
+  pdEl("pd-view").innerHTML = buildPrintSVG(plan, false, { w: Math.round(plan.paperW*s), h: Math.round(plan.paperH*s) });
+
+  const b = plan.b;
+  pdEl("pd-info").innerHTML = b
+    ? `用紙：${plan.paperName.toUpperCase()} ${plan.landscape?"横":"縦"}（${plan.paperW}×${plan.paperH}mm）<br>`
+      + `図面の実寸：${Math.round(b.w)}×${Math.round(b.h)}mm<br>`
+      + `<b>用紙いっぱいに縮小して印刷</b>（${escapeHtml(scaleLabel(plan.k))}）<br>`
+      + `寸法線の数字は実寸のまま入ります`
+    : "図面がまだありません。";
+  // 縮小しすぎて図面内の文字が読めなくなる場合だけ知らせる（寸法線の数字は大きさ固定なので対象外）
+  const smallest = (project.texts||[]).reduce((m,t)=>Math.min(m,(t.size||20)*plan.k), Infinity);
+  pdEl("pd-warn").textContent = (b && smallest < 2.2)
+    ? `⚠ 図面に入れた文字が紙の上で ${smallest.toFixed(1)}mm ほどになり、読みにくいかもしれません。大きい用紙にするか、余白を減らすと大きくなります。`
+    : "";
+  pdEl("pd-print").disabled = !b;
+}
+
+function openPrintDialog(){
+  pdEl("print-back").classList.add("show");
+  pdEl("print-dlg").classList.add("show");
+  requestAnimationFrame(refreshPrintPreview);   // レイアウト確定後に実寸で組む
+}
+function closePrintDialog(){
+  pdEl("print-back").classList.remove("show");
+  pdEl("print-dlg").classList.remove("show");
+  pdEl("pd-view").innerHTML = "";
+  pdEl("print-sheet").innerHTML = "";
+}
+// 印刷は専用のiframeの中で行う。
+// 本体側で window.print() すると、印刷用表示への切り替えで #main が消える
+// → resize が飛ぶ → プレビュー再構築と render() が走る、を繰り返して固まってしまうため。
+let printing = false;
+function doPrint(){
+  if (printing) return;
+  const plan = printPlan();
+  if (!plan.b) return;
+  printing = true;                       // ← これが立っている間は resize での再描画を全部止める
+
+  // 紙面を用意して、body に印刷用の姿を着せる
+  pdEl("print-sheet").innerHTML = buildPrintSVG(plan, true, null);
+  pdEl("print-page-style").textContent = `@page { size: ${plan.paperW}mm ${plan.paperH}mm; margin: 0; }`;
+  document.body.classList.add("printing-sheet");
+
+  const cleanup = ()=>{
+    document.body.classList.remove("printing-sheet");
+    pdEl("print-sheet").innerHTML = "";
+    pdEl("print-page-style").textContent = "";
+    printing = false;
+    updateViewport(); render();          // 画面をきちんと元に戻す
+  };
+  // 着せ替えが反映されてから印刷ダイアログを出す
+  setTimeout(()=>{
+    try { window.print(); }
+    catch(err){ alert("印刷を開始できませんでした：" + err.message); }
+    setTimeout(cleanup, 100);            // 印刷ダイアログを閉じた後に片付ける
+  }, 80);
+}
+["pd-paper","pd-orient","pd-margin","pd-title"].forEach(id=>{
+  const n = pdEl(id); n.addEventListener("change", refreshPrintPreview); n.addEventListener("input", refreshPrintPreview);
+});
+pdEl("pd-x").addEventListener("click", closePrintDialog);
+pdEl("print-back").addEventListener("click", closePrintDialog);
+pdEl("pd-print").addEventListener("click", doPrint);
+// リサイズのたびに作り直すと重いので1フレームにまとめる（印刷中は触らない）
+let pdResizePending = false;
+window.addEventListener("resize", ()=>{
+  if (printing || pdResizePending || !pdEl("print-dlg").classList.contains("show")) return;
+  pdResizePending = true;
+  requestAnimationFrame(()=>{ pdResizePending = false; if (!printing) refreshPrintPreview(); });
+});
 
 // ----- 内側にステッチ（輪郭に平行な点線）-----
 function stitchInside(part, mm){
@@ -2482,18 +2734,27 @@ function loadLocal(){
 }
 
 // ===== Fit view =====
-function fitView(){
-  // include text extents too, otherwise labels/notes get cut off
+// 図面全体の範囲(mm)。文字のはみ出しも含める。何も無ければ null。
+function contentBounds(){
   const all = project.parts.flatMap(p=>p.nodes).map(n=>({x:n.x,y:n.y}));
+  for (const p of project.parts){          // 縫い代のぶんだけ外側に広げておく
+    if (p.closed && p.seam>0) for (const n of p.nodes) all.push({x:n.x-p.seam,y:n.y-p.seam},{x:n.x+p.seam,y:n.y+p.seam});
+  }
   for (const t of (project.texts||[])){
     const len = Math.max(1,(t.text||"").length) * (t.size||20) * 0.95, h2 = (t.size||20);
     if (t.vertical) all.push({x:t.x-h2/2, y:t.y}, {x:t.x+h2/2, y:t.y+len});
     else            all.push({x:t.x, y:t.y-h2/2}, {x:t.x+len, y:t.y+h2/2});
   }
-  const w = vpW, h = vpH;
-  if (all.length===0){ view = { scale: 2.5, tx: 60, ty: 60 }; render(); return; }
+  if (!all.length) return null;
   let minx=Infinity,miny=Infinity,maxx=-Infinity,maxy=-Infinity;
   for (const n of all){ minx=Math.min(minx,n.x); miny=Math.min(miny,n.y); maxx=Math.max(maxx,n.x); maxy=Math.max(maxy,n.y); }
+  return { minx, miny, maxx, maxy, w: Math.max(1,maxx-minx), h: Math.max(1,maxy-miny) };
+}
+function fitView(){
+  const b = contentBounds();
+  const w = vpW, h = vpH;
+  if (!b){ view = { scale: 2.5, tx: 60, ty: 60 }; render(); return; }
+  const minx=b.minx, miny=b.miny, maxx=b.maxx, maxy=b.maxy;
   const pad = 60;
   const sx = (w-2*pad)/Math.max(1,maxx-minx), sy=(h-2*pad)/Math.max(1,maxy-miny);
   view.scale = Math.min(40, Math.max(0.2, Math.min(sx,sy)));
@@ -2511,9 +2772,11 @@ function seedExample(){
   project.parts[0].fabric = "本革A";
 }
 
-window.addEventListener("resize", ()=>{ updateViewport(); render(); });
+// 印刷中は触らない。印刷用の表示に切り替わると #main が消えて resize が飛ぶが、
+// そこで再描画すると再レイアウトを呼び、それがまた resize を呼んで固まってしまう。
+window.addEventListener("resize", ()=>{ if (printing) return; updateViewport(); render(); });
 window.addEventListener("scroll", updateViewport, true);   // keep the cached rect honest
-if (window.ResizeObserver) new ResizeObserver(()=>updateViewport()).observe(svg);
+if (window.ResizeObserver) new ResizeObserver(()=>{ if (!printing) updateViewport(); }).observe(svg);
 updateViewport();
 loadLocal();
 seedExample();
