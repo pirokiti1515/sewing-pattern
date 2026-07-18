@@ -1,0 +1,2307 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>縫製図面エディタ</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font-family: "Hiragino Sans", "Yu Gothic", system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; overflow: hidden; background: #f3f4f6; color: #1f2937; }
+
+  /* ---- Top bar (slim: undo/redo + context options + menu) ---- */
+  #toolbar {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap; row-gap: 4px;
+    padding: 6px 10px; background: #1f2937; color: #f9fafb;
+    box-shadow: 0 1px 3px rgba(0,0,0,.3); z-index: 10;
+  }
+  #toolbar .title { font-weight: 700; margin-right: 10px; font-size: 15px; white-space: nowrap; }
+  #toolbar .sep { width: 1px; height: 22px; background: #4b5563; margin: 0 4px; flex-shrink: 0; }
+  #toolbar .spacer { flex: 1; }
+  #toolbar button {
+    background: #374151; color: #f9fafb; border: 1px solid #4b5563;
+    border-radius: 6px; padding: 6px 10px; font-size: 13px; cursor: pointer; white-space: nowrap;
+  }
+  #toolbar button:hover { background: #4b5563; }
+  #toolbar button:disabled { opacity: .4; cursor: default; }
+  #toolbar label { font-size: 12px; display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+  #toolbar input[type="number"] { width: 50px; padding: 3px 4px; border-radius: 4px; border: 1px solid #4b5563; }
+  .ctx { display: none; align-items: center; gap: 8px; }
+  .ctx.show { display: flex; }
+  /* menu dropdown */
+  #menu-wrap { position: relative; }
+  #menu-dropdown {
+    display: none; position: absolute; right: 0; top: calc(100% + 6px);
+    background: #1f2937; border: 1px solid #4b5563; border-radius: 8px; padding: 6px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.4); z-index: 20; min-width: 150px;
+  }
+  #menu-dropdown.show { display: block; }
+  #menu-dropdown button { display: block; width: 100%; text-align: left; margin: 2px 0; border-color: transparent; }
+
+  /* ---- Main ---- */
+  #main { flex: 1; display: flex; min-height: 0; }
+  /* ---- Left tool panel (Affinity-style) ---- */
+  #toolpanel {
+    display: flex; flex-direction: column; gap: 4px; padding: 8px 6px;
+    background: #111827; box-shadow: 1px 0 3px rgba(0,0,0,.3); z-index: 9;
+  }
+  button.tool {
+    position: relative; width: 58px; padding: 6px 2px; background: #374151; color: #f9fafb;
+    border: 1px solid #4b5563; border-radius: 8px; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+  }
+  button.tool .ic { font-size: 18px; line-height: 1; }
+  button.tool .tl { font-size: 11px; }
+  button.tool:hover { background: #4b5563; }
+  button.tool.active { background: #2563eb; border-color: #93c5fd; box-shadow: 0 0 0 2px rgba(147,197,253,.5); font-weight: 700; }
+  .tp-sep { height: 1px; background: #374151; margin: 4px 4px; }
+  .tool-flyout-wrap { position: relative; }
+  .fly-tri { position: absolute; right: 3px; bottom: 2px; font-size: 9px; opacity: .7; }
+  .flyout {
+    display: none; position: absolute; left: calc(100% + 8px); top: 0; z-index: 15;
+    flex-direction: column; gap: 4px; padding: 5px;
+    background: #111827; border: 1px solid #4b5563; border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.45);
+  }
+  .flyout.show { display: flex; }
+  #canvas-wrap { flex: 1; position: relative; overflow: hidden; background: #fff; }
+  svg { width: 100%; height: 100%; display: block; touch-action: none; }
+  svg.mode-draw { cursor: crosshair; }
+  svg.mode-rect { cursor: crosshair; }
+  svg.mode-ellipse { cursor: crosshair; }
+  svg.mode-edit { cursor: default; }
+  svg.mode-text { cursor: text; }
+  svg.mode-stitch { cursor: crosshair; }
+  svg.mode-arrow { cursor: crosshair; }
+  svg.mode-dim { cursor: crosshair; }
+  svg.mode-select { cursor: default; }
+  svg.mode-notch { cursor: cell; }
+  svg.mode-pan { cursor: grab; }
+  /* current-mode badge (always visible, top-left) */
+  #mode-badge {
+    position: absolute; right: 10px; top: 10px; z-index: 6;
+    background: #2563eb; color: #fff; font-weight: 700; font-size: 13px;
+    padding: 6px 12px; border-radius: 999px; box-shadow: 0 1px 4px rgba(0,0,0,.25);
+    pointer-events: none; display: flex; align-items: center; gap: 6px;
+  }
+  /* selection action bar - now inline in the top toolbar */
+  #action-bar { gap: 6px; }
+  #action-bar button {
+    background: #374151; color: #f9fafb; border: 1px solid #4b5563;
+    border-radius: 6px; padding: 5px 8px; font-size: 13px; cursor: pointer; line-height: 1;
+  }
+  #action-bar button:hover { background: #4b5563; }
+  #action-bar button.danger { border-color: #ef4444; color: #fca5a5; }
+  #action-bar input { width: 40px; padding: 3px 4px; border-radius: 4px; border: 1px solid #4b5563; }
+  #action-bar .grp { display: flex; align-items: center; gap: 3px; }
+  #hint {
+    display: none;                       /* off by default - toggle with the ? button */
+    position: absolute; left: 10px; bottom: 10px; background: rgba(31,41,55,.85);
+    color: #fff; padding: 6px 10px; border-radius: 6px; font-size: 12px; pointer-events: none;
+    max-width: 70%;
+  }
+  #hint.show { display: block; }
+  #readout { font-size: 11px; color: #9ca3af; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #btn-help.active { background: #2563eb; border-color: #93c5fd; }
+
+  /* ---- Sidebar ---- */
+  #sidebar { width: 260px; background: #fafafa; border-left: 1px solid #e5e7eb; overflow-y: auto; padding: 12px; }
+  #sidebar h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; margin: 4px 0 8px; }
+  .part-item { border: 1px solid #e5e7eb; border-radius: 7px; padding: 5px 6px; margin-bottom: 4px; background: #fff; cursor: pointer; }
+  .part-item .grip { cursor: grab; color: #9ca3af; font-size: 12px; letter-spacing: -2px; user-select: none; flex-shrink: 0; padding: 0 2px; }
+  .part-item .grip:active { cursor: grabbing; }
+  .part-item.dragging { opacity: .45; }
+  .part-item.drop-before { box-shadow: 0 -3px 0 0 #2563eb; }
+  .part-item.drop-after { box-shadow: 0 3px 0 0 #2563eb; }
+  .part-item .ptype { font-size: 13px; width: 16px; text-align: center; flex-shrink: 0; opacity: .75; }
+  .part-item.selected { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,.2); }
+  .part-item .row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .part-item label { font-size: 11px; color: #6b7280; width: 46px; flex-shrink: 0; }
+  .part-item input { flex: 1; padding: 3px 5px; font-size: 13px; border: 1px solid #d1d5db; border-radius: 4px; min-width: 0; }
+  .part-item .swatch { width: 22px; height: 22px; padding: 0; border: 1px solid #d1d5db; border-radius: 4px; flex-shrink: 0; cursor: pointer; background: none; }
+  .part-item .chips { gap: 3px; flex-wrap: nowrap; margin-top: 4px; padding-left: 18px; }
+  .part-item .chip { width: 15px; height: 15px; border-radius: 50%; border: 1px solid rgba(0,0,0,.15); cursor: pointer; padding: 0; flex: none; }
+  .part-item .chip:hover { transform: scale(1.25); }
+  .part-item .chip.on { outline: 2px solid #111827; outline-offset: 1px; }
+  .part-item .del { margin-left: auto; background: none; border: none; color: #ef4444; cursor: pointer; font-size: 13px; }
+  .part-item .ops { gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+  .part-item .ops button { flex: none; padding: 4px 8px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 5px; background: #f3f4f6; cursor: pointer; }
+  .part-item .ops button:hover { background: #e5e7eb; }
+  #empty-note { color: #9ca3af; font-size: 13px; line-height: 1.6; }
+
+  /* SVG styles */
+  .grid-line { stroke: #e5e7eb; stroke-width: 1; }
+  .grid-line.major { stroke: #d1d5db; }
+  .axis { stroke: #cbd5e1; stroke-width: 1.5; }
+  .part-outline { fill-opacity: .04; stroke-width: 2; vector-effect: non-scaling-stroke; }
+  .part-outline.selected { stroke-width: 3; fill-opacity: .16; }
+  .seam-line { fill: none; stroke-dasharray: 6 4; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  /* ステッチ線は手動・自動で同じ見た目（.stitchline=手描き / .stitch-line=辺から自動） */
+  .stitchline, .stitch-line {
+    fill: none; stroke-dasharray: 7 4; stroke-width: 2;
+    stroke-linecap: round; vector-effect: non-scaling-stroke;
+  }
+  .arrowline { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+  .dimline { fill: none; stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+  .dimtick { stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+  .dimtext { font-size: 12px; font-weight: 700; paint-order: stroke; stroke: #fff; stroke-width: 3px; dominant-baseline: middle; }
+  .notch { stroke-width: 2.5; vector-effect: non-scaling-stroke; stroke-linecap: round; }
+  .edge-len { font-size: 11px; fill: #374151; paint-order: stroke; stroke: #fff; stroke-width: 3px; }
+  .vertex { fill: #fff; stroke: #2563eb; stroke-width: 1.5; vector-effect: non-scaling-stroke; cursor: grab; }
+  .vertex.dragging { cursor: grabbing; fill: #2563eb; }
+  .vertex.sel { fill: #f59e0b; stroke: #b45309; stroke-width: 2.5; }
+  .selpt { fill: #fff; stroke: #2563eb; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .selpt.on { fill: #f59e0b; stroke: #b45309; stroke-width: 2; }
+  .text-sel { fill: none; stroke: #2563eb; stroke-width: 1.5; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+  .marquee { fill: rgba(37,99,235,0.12); stroke: #2563eb; stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+  .edge-hover { fill: none; stroke: #f59e0b; stroke-width: 6; stroke-linecap: round; opacity: .55; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .midpt { fill: #f59e0b; stroke: #fff; stroke-width: 1.5; vector-effect: non-scaling-stroke; cursor: move; }
+  .midpt.hot { fill: #b45309; stroke: #fff; stroke-width: 2; }
+  .snap-guide { stroke: #ec4899; stroke-width: 1; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .snap-pt { fill: #ec4899; stroke: #fff; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .canvas-text { paint-order: stroke; stroke: #fff; stroke-width: 3px; dominant-baseline: middle; }
+  .canvas-text.sel { outline: none; }
+  #text-editor { position: absolute; z-index: 8; border: 1px solid #2563eb; border-radius: 3px; padding: 0 3px; font-family: inherit; line-height: 1.1; background: #fff; color: #111827; outline: none; box-shadow: 0 1px 4px rgba(0,0,0,.2); }
+  .part-name-label { font-size: 13px; font-weight: 700; fill: #111827; paint-order: stroke; stroke: #fff; stroke-width: 4px; }
+  .draft-line { fill: none; stroke: #2563eb; stroke-width: 2; vector-effect: non-scaling-stroke; }
+  .handle-line { stroke: #f59e0b; stroke-width: 1; vector-effect: non-scaling-stroke; }
+  .handle-dot { fill: #f59e0b; stroke: #fff; stroke-width: 1; vector-effect: non-scaling-stroke; cursor: grab; }
+  .draft-point { fill: #2563eb; }
+  .start-marker { fill: none; stroke: #16a34a; stroke-width: 2; vector-effect: non-scaling-stroke; }
+
+  /* right-click context menu */
+  #context-menu {
+    display: none; position: absolute; z-index: 30; min-width: 150px;
+    background: #1f2937; border: 1px solid #4b5563; border-radius: 8px; padding: 6px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.4);
+  }
+  #context-menu.show { display: block; }
+  #context-menu button {
+    display: block; width: 100%; text-align: left; background: none; color: #f9fafb;
+    border: none; border-radius: 5px; padding: 7px 10px; font-size: 13px; cursor: pointer;
+  }
+  #context-menu button:hover { background: #374151; }
+  #context-menu .cm-title { color: #fbbf24; font-size: 12px; font-weight: 700; padding: 4px 10px 6px; }
+  #context-menu .cm-colors { display: flex; gap: 5px; padding: 4px 10px 8px; flex-wrap: wrap; max-width: 190px; }
+  #context-menu .cm-colors .chip { width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(255,255,255,.4); cursor: pointer; padding: 0; }
+  #context-menu .cm-colors .chip:hover { transform: scale(1.2); }
+  #context-menu .cm-sep { height: 1px; background: #4b5563; margin: 4px 0; }
+
+  @media print {
+    #toolbar, #toolpanel, #sidebar, #hint, #mode-badge, #context-menu { display: none !important; }
+    body { background: #fff; }
+    .grid-line, .axis { display: none; }
+  }
+</style>
+</head>
+<body>
+  <div id="toolbar">
+    <span class="title">縫製図面エディタ</span>
+    <button id="btn-undo" title="元に戻す (Ctrl/⌘+Z)" disabled>↶</button>
+    <button id="btn-redo" title="やり直し (Ctrl/⌘+Shift+Z)" disabled>↷</button>
+    <span class="sep"></span>
+    <!-- 常時表示の表示オプション -->
+    <span class="ctx" id="ctx-common">
+      <label><input type="checkbox" id="chk-snap" checked> スナップ</label>
+      <label>格子<input type="number" id="grid-size" value="10" min="1" step="1">mm</label>
+      <label title="パーツ同士の角・辺に吸着"><input type="checkbox" id="chk-magnet" checked>🧲吸着</label>
+      <label title="全パーツの辺の寸法を表示"><input type="checkbox" id="chk-dim">寸法</label>
+    </span>
+    <!-- 編集ツールの時だけ：接円弧 -->
+    <span class="ctx" id="ctx-edit">
+      <span class="sep"></span>
+      <label title="角を選んでからスライダーで丸める">⌒接円弧
+        <input type="range" id="fillet-slider" min="0" max="150" value="20" style="width:90px">
+        <input type="number" id="fillet-r" value="20" min="0" step="1" style="width:44px">mm
+      </label>
+    </span>
+    <!-- パーツ選択中だけ：操作バー（接円弧の右隣） -->
+    <span class="ctx" id="action-bar">
+      <span class="sep"></span>
+      <span class="grp">
+        <button id="ab-rotl" title="左に回転">⟲</button>
+        <input type="number" id="ab-angle" value="15" min="1" step="1" style="width:38px" title="回転角度">°
+        <button id="ab-rotr" title="右に回転">⟳</button>
+      </span>
+      <button id="ab-dup" title="複製">⧉</button>
+      <button id="ab-fliph" title="左右反転">⇋</button>
+      <button id="ab-flipv" title="上下反転">⇅</button>
+      <button id="ab-group" title="グループ化">🔗</button>
+      <button id="ab-ungroup" title="グループ解除">⛓</button>
+      <button id="ab-del" class="danger" title="削除">🗑</button>
+    </span>
+    <!-- 四角/円ツールの時だけ：寸法作成 -->
+    <span class="ctx" id="ctx-shape">
+      <span class="sep"></span>
+      幅<input type="number" id="shape-w" value="200" min="1">×高<input type="number" id="shape-h" value="150" min="1">mm
+      <button id="btn-mk-rect" title="この寸法で四角を作成">▭作成</button>
+      <button id="btn-mk-ellipse" title="この寸法で円を作成">◯作成</button>
+    </span>
+    <!-- ステッチツールの時だけ：内側オフセット -->
+    <span class="ctx" id="ctx-stitch">
+      <span class="sep"></span>
+      <label title="輪郭の内側に、この距離で平行なステッチ点線を入れます">内側<input type="number" id="stitch-mm" value="5" min="1" step="1" style="width:44px">mm</label>
+      <button id="btn-stitch-inside" title="選択中のパーツの内側にステッチを入れる">🧵 内側に入れる</button>
+    </span>
+    <!-- 文字ツールの時だけ：文字サイズ -->
+    <span class="ctx" id="ctx-text">
+      <span class="sep"></span>
+      <label title="文字の大きさ">文字<input type="number" id="text-size" value="20" min="4" step="1">mm</label>
+      <label title="細長いパーツの名前などに"><input type="checkbox" id="text-vertical">縦書き</label>
+      <label title="文字の色"><input type="color" id="text-color" value="#111827" style="width:26px;height:22px;padding:0;border:1px solid #4b5563;border-radius:4px;background:none"></label>
+    </span>
+    <span class="spacer"></span>
+    <span id="readout" title="カーソル位置と表示倍率"></span>
+    <button id="btn-help" title="操作ヒントの表示/非表示">?</button>
+    <button id="btn-sidebar" title="パーツ一覧の表示/非表示">▤ 一覧</button>
+    <div id="menu-wrap">
+      <button id="menu-btn" title="ファイル・表示">≡ メニュー</button>
+      <div id="menu-dropdown">
+        <button id="btn-fit">🔎 全体表示</button>
+        <button id="btn-save">💾 保存</button>
+        <button id="btn-load">📂 開く</button>
+        <button id="btn-print">🖨 印刷</button>
+      </div>
+    </div>
+    <input type="file" id="file-input" accept=".json" style="display:none">
+  </div>
+
+  <div id="main">
+    <div id="toolpanel">
+      <button class="tool" data-tool="pan" id="tool-pan" title="移動 (H)"><span class="ic">✋</span><span class="tl">移動</span></button>
+      <button class="tool active" data-tool="select" id="tool-select" title="選択・編集 (V)"><span class="ic">⬚</span><span class="tl">選択</span></button>
+      <span class="tp-sep"></span>
+      <button class="tool" data-tool="draw" id="tool-draw" title="ペン (P)"><span class="ic">✏️</span><span class="tl">ペン</span></button>
+      <div class="tool-flyout-wrap">
+        <button class="tool" data-tool="__shape" id="tool-shape" title="図形（四角・丸）"><span class="ic" id="shape-ic">▭</span><span class="tl">図形</span><span class="fly-tri">▸</span></button>
+        <div id="shape-flyout" class="flyout">
+          <button class="tool" data-tool="rect" id="tool-rect" title="四角 (R)"><span class="ic">▭</span><span class="tl">四角</span></button>
+          <button class="tool" data-tool="ellipse" id="tool-ellipse" title="丸 (O)"><span class="ic">◯</span><span class="tl">丸</span></button>
+        </div>
+      </div>
+      <button class="tool" data-tool="text" id="tool-text" title="文字 (T)"><span class="ic">T</span><span class="tl">文字</span></button>
+      <button class="tool" data-tool="stitch" id="tool-stitch" title="ステッチ線 (S)"><span class="ic">🧵</span><span class="tl">ステッチ</span></button>
+      <button class="tool" data-tool="dim" id="tool-dim" title="寸法線 (D)"><span class="ic">📏</span><span class="tl">寸法線</span></button>
+      <button class="tool" data-tool="arrow" id="tool-arrow" title="矢印：地の目・引き出し線 (A)"><span class="ic">↗</span><span class="tl">矢印</span></button>
+      <button class="tool" data-tool="notch" id="tool-notch" title="合印 (N)"><span class="ic">⊹</span><span class="tl">合印</span></button>
+    </div>
+    <div id="canvas-wrap">
+      <svg id="svg" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="context-stroke"></path>
+          </marker>
+        </defs>
+        <g id="g-grid"></g>
+        <g id="g-parts"></g>
+        <g id="g-texts"></g>
+        <g id="g-draft"></g>
+        <g id="g-handles"></g>
+      </svg>
+      <input id="text-editor" type="text" spellcheck="false" style="display:none">
+      <div id="context-menu">
+        <button data-cmd="fit">🔎 全体表示</button>
+        <button data-cmd="save">💾 保存</button>
+        <button data-cmd="load">📂 開く</button>
+        <button data-cmd="print">🖨 印刷</button>
+      </div>
+      <div id="mode-badge"></div>
+      <div id="hint"></div>
+    </div>
+    <div id="sidebar">
+      <h2>パーツ一覧　<span style="text-transform:none;letter-spacing:0;color:#9ca3af;font-weight:400">⋮⋮で並び替え</span></h2>
+      <div id="part-list"></div>
+      <p id="empty-note">
+        <b>描く</b><br>
+        左の <b>▭ 図形</b> でドラッグ＝四角・丸<br>
+        <b>✏️ ペン</b> でクリック＝角、ドラッグ＝曲線<br>
+        （最初の点に戻ると閉じる／Enterで確定）<br>
+        <b>T 文字</b>・<b>🧵 ステッチ</b>・<b>↗ 矢印</b>・<b>⊹ 合印</b> も同様に<br><br>
+        <b>直す</b>：<b>⬚ 選択</b> ひとつで全部できます<br>
+        ・パーツをクリック＝まるごと選択・移動<br>
+        ・白い■の点をドラッグ＝その点だけ移動<br>
+        ・オレンジ●（辺の中央）をドラッグ＝辺ごと動く<br>
+        ・点をダブルクリック＝角↔曲線<br>
+        ・Shift+クリック＝点を追加<br>
+        ・<b>右クリック＝色の変更・複製・削除</b>
+      </p>
+    </div>
+  </div>
+
+<script>
+"use strict";
+
+// ===== State =====
+const svg = document.getElementById("svg");
+const gGrid = document.getElementById("g-grid");
+const gParts = document.getElementById("g-parts");
+const gDraft = document.getElementById("g-draft");
+const gHandles = document.getElementById("g-handles");
+const gTexts = document.getElementById("g-texts");
+
+// ---- perf: cache the viewport size (reading clientWidth every frame forces a
+// full synchronous layout of the SVG, which is very slow when zoomed in) ----
+let vpW = 0, vpH = 0;
+let svgRect = null;
+function updateViewport(){ vpW = svg.clientWidth; vpH = svg.clientHeight; svgRect = svg.getBoundingClientRect(); }
+// ---- perf: coalesce rapid redraws (drags) into one paint per animation frame ----
+let rafPending = false;
+function renderThrottled(){
+  if (rafPending) return;
+  rafPending = true;
+  requestAnimationFrame(()=>{ rafPending = false; render(); });
+}
+
+const PALETTE = ["#2563eb","#dc2626","#16a34a","#d97706","#7c3aed","#0891b2","#db2777","#65a30d"];
+const STITCH_COLOR = "#dc2626";   // ステッチ線は赤
+const COLORS = ["#2563eb","#0891b2","#16a34a","#65a30d","#d97706","#dc2626","#db2777","#7c3aed","#4b5563","#111827"];
+
+let project = {
+  name: "無題の図面",
+  unit: "mm",
+  parts: [],  // {id, name, qty, fabric, color, seam, closed, nodes:[{x,y}]}
+  texts: []   // {id, x, y, text, size, color}
+};
+
+let view = { scale: 2.5, tx: 60, ty: 60 }; // px per mm, translation in px
+let tool = "select";   // start in 選択 so stray clicks never create/deform anything
+let selectedPartId = null;
+let draft = null;           // {nodes:[{x,y}]}
+let drag = null;            // {partId, index} while dragging a vertex
+let panning = null;         // {x,y,tx,ty}
+let mouseWorld = {x:0, y:0};
+let idCounter = 1;
+let lastVClick = { id:null, idx:-1, t:0 };  // for manual double-click (round/corner)
+let penDrag = null;         // {index, anchor} while dragging out a handle during drawing
+let handleDrag = null;      // {partId, index, which:"in"|"out"} while editing a handle
+let selVertex = null;       // {partId, idx} currently selected anchor (for 接円弧/fillet)
+let multiSel = [];          // [{partId, idx}] points selected by the 選択 tool
+let marquee = null;         // {x0,y0,x1,y1} rubber-band rectangle (screen px)
+let selMove = null;         // {startW, orig:[{partId,idx,x,y}]} while moving the selection
+let suppressListRender = false;  // keep the sidebar DOM alive while typing in it
+let selTextId = null;      // text picked with the 選択 tool
+let lastTClick = { id:null, t:0 };
+let hoverEdge = null;       // {partId, i} edge whose middle handle is under the cursor
+let selMode = "points";     // "part" = whole part picked, "points" = individual points picked
+
+// The middle handle of an edge: grab it to move that whole edge.
+function findMidEdgeAt(sp, partId){
+  const part = project.parts.find(p=>p.id===partId);
+  if (!part || part.nodes.length<2) return null;
+  const n = part.nodes.length, segCount = part.closed ? n : n-1;
+  let best = { d: Infinity, i: -1 };
+  for (let i=0;i<segCount;i++){
+    const m = segMidWorld(part.nodes, i, part.closed);
+    const s = worldToScreen(m);
+    const d = Math.hypot(sp.x-s.x, sp.y-s.y);
+    if (d < best.d) best = { d, i };
+  }
+  return best.d < 11 ? { part, i: best.i } : null;
+}
+let shapeDrag = null;       // {start:{x,y}} while dragging out a rectangle/ellipse
+let editingTextId = null;   // id of the text currently open in the inline editor
+let editSnap = null;        // project snapshot captured when the text editor opened
+let newTextFresh = false;   // the text being edited was just created (cancel removes it)
+let textDrag = null;        // {id, startW, ox, oy, moved} while dragging a text
+
+// Text hit-test (approximate box; CJK ~ size per char).
+// Approximate world-space box of a text (CJK ≈ one em per character).
+function textBox(t){
+  const len = Math.max(1,(t.text||" ").length) * (t.size||20) * 0.95, h = (t.size||20);
+  return t.vertical
+    ? { x0: t.x - h/2, y0: t.y,       x1: t.x + h/2, y1: t.y + len }
+    : { x0: t.x,       y0: t.y - h/2, x1: t.x + len, y1: t.y + h/2 };
+}
+function findTextAt(wp){
+  for (let i=project.texts.length-1;i>=0;i--){
+    const b = textBox(project.texts[i]);
+    if (wp.x>=b.x0-2 && wp.x<=b.x1+2 && wp.y>=b.y0-2 && wp.y<=b.y1+2) return project.texts[i];
+  }
+  return null;
+}
+function renderTexts(){
+  gTexts.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  for (const t of project.texts){
+    if (editingTextId===t.id) continue; // hidden while its editor is open
+    const s = worldToScreen(t);
+    const el = mk("text", { x:s.x, y:s.y, class:"canvas-text", fill:t.color||"#111827", "font-size": Math.max(6,(t.size||20)*view.scale) });
+    if (t.vertical){ el.style.writingMode = "vertical-rl"; el.style.dominantBaseline = "auto"; }
+    el.textContent = t.text;
+    frag.appendChild(el);
+  }
+  gTexts.appendChild(frag);
+}
+function openTextEditor(t, isNew){
+  editingTextId = t.id; newTextFresh = !!isNew; editSnap = snap();
+  // reflect this text's properties in the context bar so they can be tweaked
+  document.getElementById("text-size").value = t.size || 20;
+  document.getElementById("text-color").value = t.color || "#111827";
+  document.getElementById("text-vertical").checked = !!t.vertical;
+  const ed = document.getElementById("text-editor");
+  const s = worldToScreen(t);
+  const px = Math.max(11, (t.size||20)*view.scale);
+  ed.style.display = "block";
+  ed.style.left = s.x + "px";
+  ed.style.top  = (s.y - px*0.7) + "px";
+  ed.style.fontSize = px + "px";
+  ed.style.color = t.color || "#111827";
+  ed.style.minWidth = "60px";
+  ed.value = t.text || "";
+  render();
+  setTimeout(()=>{ ed.focus(); ed.select(); }, 0);
+}
+function commitTextEditor(){
+  if (editingTextId==null) return;
+  const ed = document.getElementById("text-editor");
+  const t = project.texts.find(x=>x.id===editingTextId);
+  const beforeSnap = editSnap;
+  if (t){
+    t.text = ed.value;
+    if (!t.text.trim()) project.texts = project.texts.filter(x=>x.id!==t.id);
+  }
+  editingTextId = null; newTextFresh = false; editSnap = null;
+  ed.style.display = "none"; ed.value = "";
+  if (beforeSnap && beforeSnap !== snap()) pushUndoSnapshot(beforeSnap);
+  saveLocal(); render();
+}
+function cancelTextEditor(){
+  if (editingTextId==null) return;
+  if (newTextFresh) project.texts = project.texts.filter(x=>x.id!==editingTextId);
+  editingTextId = null; newTextFresh = false; editSnap = null;
+  const ed = document.getElementById("text-editor"); ed.style.display = "none"; ed.value = "";
+  render();
+}
+let snapGuides = [];        // magnet guide overlays during a move
+
+// Build the nodes for a rectangle spanning two opposite corners.
+function rectNodes(a, b){
+  const x0=Math.min(a.x,b.x), y0=Math.min(a.y,b.y), x1=Math.max(a.x,b.x), y1=Math.max(a.y,b.y);
+  return [ {x:x0,y:y0,hIn:null,hOut:null}, {x:x1,y:y0,hIn:null,hOut:null}, {x:x1,y:y1,hIn:null,hOut:null}, {x:x0,y:y1,hIn:null,hOut:null} ];
+}
+// Build 4 bézier nodes approximating an ellipse inside the bounding box a..b.
+function ellipseNodes(a, b){
+  const cx=(a.x+b.x)/2, cy=(a.y+b.y)/2, rx=Math.abs(a.x-b.x)/2, ry=Math.abs(a.y-b.y)/2;
+  const kx=rx*0.5523, ky=ry*0.5523;
+  return [
+    { x:cx,      y:cy-ry, hIn:{x:-kx,y:0}, hOut:{x:kx,y:0} },   // top
+    { x:cx+rx,   y:cy,    hIn:{x:0,y:-ky}, hOut:{x:0,y:ky} },   // right
+    { x:cx,      y:cy+ry, hIn:{x:kx,y:0},  hOut:{x:-kx,y:0} },  // bottom
+    { x:cx-rx,   y:cy,    hIn:{x:0,y:ky},  hOut:{x:0,y:-ky} }   // left
+  ];
+}
+
+// All anchor points whose screen position lies inside a screen-space rectangle.
+function pointsInRect(x0,y0,x1,y1){
+  const xa=Math.min(x0,x1), xb=Math.max(x0,x1), ya=Math.min(y0,y1), yb=Math.max(y0,y1);
+  const res=[];
+  for (const part of project.parts){
+    part.nodes.forEach((nd,i)=>{
+      const s = worldToScreen(nd);
+      if (s.x>=xa && s.x<=xb && s.y>=ya && s.y<=yb) res.push({ partId:part.id, idx:i });
+    });
+  }
+  return res;
+}
+function nodeOf(m){ const p = project.parts.find(pp=>pp.id===m.partId); return p ? p.nodes[m.idx] : null; }
+function selCentroid(){
+  let x=0,y=0,n=0; for (const m of multiSel){ const nd=nodeOf(m); if(nd){ x+=nd.x; y+=nd.y; n++; } }
+  return n ? { x:x/n, y:y/n } : { x:0, y:0 };
+}
+// Rotate the currently-selected points around their centroid (handles included).
+function rotateSelection(deg){
+  if (!multiSel.length) return; pushUndo();
+  const c=selCentroid(), rad=deg*Math.PI/180, cos=Math.cos(rad), sin=Math.sin(rad);
+  const rot=(p)=>({ x:c.x+(p.x-c.x)*cos-(p.y-c.y)*sin, y:c.y+(p.x-c.x)*sin+(p.y-c.y)*cos });
+  const rotOff=(o)=> o?{ x:o.x*cos-o.y*sin, y:o.x*sin+o.y*cos }:null;
+  for (const m of multiSel){ const nd=nodeOf(m); if(nd){ const p=rot(nd); nd.x=p.x; nd.y=p.y; nd.hIn=rotOff(nd.hIn); nd.hOut=rotOff(nd.hOut); } }
+  saveLocal(); render();
+}
+// Flip the selected points across their centroid. axis "h"=left-right, "v"=up-down.
+function flipSelection(axis){
+  if (!multiSel.length) return; pushUndo();
+  const c=selCentroid();
+  const fp=(p)=> axis==="h" ? { x:2*c.x-p.x, y:p.y } : { x:p.x, y:2*c.y-p.y };
+  const fo=(o)=> o ? (axis==="h" ? { x:-o.x, y:o.y } : { x:o.x, y:-o.y }) : null;
+  for (const m of multiSel){ const nd=nodeOf(m); if(nd){ const p=fp(nd); nd.x=p.x; nd.y=p.y; nd.hIn=fo(nd.hIn); nd.hOut=fo(nd.hOut); } }
+  saveLocal(); render();
+}
+// Duplicate the part(s) that own the selected points, placing copies beside them.
+function duplicateSelection(){
+  if (!multiSel.length) return; pushUndo();
+  const ids = [...new Set(multiSel.map(m=>m.partId))];
+  const srcParts = ids.map(id=>project.parts.find(p=>p.id===id)).filter(Boolean);
+  if (!srcParts.length) return;
+  // ONE shared offset for everything, so a copied group keeps its internal layout
+  const xs = srcParts.flatMap(p=>p.nodes.map(n=>n.x));
+  const dx = Math.round((Math.max(...xs) - Math.min(...xs)) + 40);
+  // copies of grouped parts stay grouped together (as their own new group)
+  const groupMap = new Map();
+  const copies = [];
+  for (const part of srcParts){
+    const c = duplicatePart(part, dx, 0);
+    if (part.group){
+      if (!groupMap.has(part.group)) groupMap.set(part.group, "g"+(idCounter++));
+      c.group = groupMap.get(part.group);
+    }
+    copies.push(c);
+  }
+  // select every copy, not just the last one
+  multiSel = [];
+  for (const c of copies) c.nodes.forEach((_,i)=>multiSel.push({ partId:c.id, idx:i }));
+  selectedPartId = copies[copies.length-1].id;
+  selMode = "part";
+  saveLocal(); render();
+}
+
+// Delete selected points; if a part loses everything, delete the whole part.
+function deleteSelection(){
+  if (!multiSel.length) return; pushUndo();
+  const byPart={}; for (const m of multiSel){ (byPart[m.partId]=byPart[m.partId]||[]).push(m.idx); }
+  for (const pid in byPart){
+    const part=project.parts.find(p=>p.id===pid); if(!part) continue;
+    if (byPart[pid].length >= part.nodes.length){ project.parts=project.parts.filter(p=>p.id!==pid); continue; }
+    const minNodes=part.closed?3:2;
+    byPart[pid].sort((a,b)=>b-a).forEach(i=>{ if(part.nodes.length>minNodes) part.nodes.splice(i,1); });
+  }
+  multiSel=[]; selectedPartId=null; saveLocal(); render();
+}
+// Is the whole part (all its nodes) currently selected?
+function wholePartSelected(){
+  if (!multiSel.length) return null;
+  const ids=[...new Set(multiSel.map(m=>m.partId))];
+  if (ids.length!==1) return null;
+  const part=project.parts.find(p=>p.id===ids[0]);
+  return (part && multiSel.length===part.nodes.length) ? part : null;
+}
+// Group the parts referenced by the current selection under a shared group id.
+function groupSelection(){
+  const ids=[...new Set(multiSel.map(m=>m.partId))];
+  if (ids.length<1) return; pushUndo();
+  const gid = "g"+(idCounter++);
+  for (const id of ids){ const p=project.parts.find(pp=>pp.id===id); if(p) p.group=gid; }
+  saveLocal(); render();
+}
+function ungroupSelection(){
+  const ids=[...new Set(multiSel.map(m=>m.partId))];
+  if (!ids.length) return; pushUndo();
+  for (const id of ids){ const p=project.parts.find(pp=>pp.id===id); if(p) p.group=null; }
+  saveLocal(); render();
+}
+// Recolor every part referenced by the current selection (Affinity: select then set color).
+function recolorSelection(color){
+  const ids=[...new Set(multiSel.map(m=>m.partId))];
+  if (!ids.length) return; pushUndo();
+  for (const id of ids){ const p=project.parts.find(pp=>pp.id===id); if(p) p.color=color; }
+  saveLocal(); render();
+}
+// ----- コピー＆ペースト（localStorage経由なので別の図面ファイルにも貼れる）-----
+let clipboard = null;
+function copySelection(){
+  const ids = [...new Set(multiSel.map(m=>m.partId))];
+  const parts = ids.map(id=>project.parts.find(p=>p.id===id)).filter(Boolean);
+  const texts = selTextId ? project.texts.filter(t=>t.id===selTextId) : [];
+  if (!parts.length && !texts.length) return false;
+  clipboard = { parts: JSON.parse(JSON.stringify(parts)), texts: JSON.parse(JSON.stringify(texts)) };
+  try { localStorage.setItem("sewing-clipboard", JSON.stringify(clipboard)); } catch(_){}
+  return true;
+}
+function pasteClipboard(){
+  let cb = clipboard;
+  if (!cb){ try { cb = JSON.parse(localStorage.getItem("sewing-clipboard")||"null"); } catch(_){} }
+  if (!cb || (!(cb.parts||[]).length && !(cb.texts||[]).length)) return false;
+  pushUndo();
+  const dx = 20, dy = 20;
+  const groupMap = new Map();
+  const newParts = [], newTexts = [];
+  for (const src of (cb.parts||[])){
+    const c = JSON.parse(JSON.stringify(src));
+    c.id = "p"+(idCounter++);
+    c.nodes = c.nodes.map(nd => ({ x:nd.x+dx, y:nd.y+dy, hIn:nd.hIn, hOut:nd.hOut }));
+    if (c.notches) c.notches = c.notches.map(q => ({ x:q.x+dx, y:q.y+dy }));
+    if (src.group){                       // pasted copies keep their grouping, as a new group
+      if (!groupMap.has(src.group)) groupMap.set(src.group, "g"+(idCounter++));
+      c.group = groupMap.get(src.group);
+    } else c.group = null;
+    project.parts.push(c); newParts.push(c);
+  }
+  for (const src of (cb.texts||[])){
+    const t = JSON.parse(JSON.stringify(src));
+    t.id = "t"+(idCounter++); t.x += dx; t.y += dy;
+    project.texts.push(t); newTexts.push(t);
+  }
+  setTool("select");
+  multiSel = [];
+  newParts.forEach(c => c.nodes.forEach((_,i)=>multiSel.push({ partId:c.id, idx:i })));
+  selectedPartId = newParts.length ? newParts[newParts.length-1].id : null;
+  selTextId = newTexts.length ? newTexts[newTexts.length-1].id : null;
+  selMode = "part";
+  saveLocal(); render();
+  return true;
+}
+// Magnet: nudge a move delta so a moving vertex snaps onto another part's vertex
+// (corner-to-corner), or aligns to its x/y (edge/line-up). Records guide overlays.
+function magnetAdjust(orig, dwx, dwy){
+  snapGuides = [];
+  if (!document.getElementById("chk-magnet").checked) return { dwx, dwy };
+  const thr = 8 / view.scale;
+  const movingKeys = new Set(orig.map(o=>o.partId+":"+o.idx));
+  const cand = [];
+  for (const part of project.parts){
+    part.nodes.forEach((nd,i)=>{ if (!movingKeys.has(part.id+":"+i)) cand.push(nd); });
+  }
+  if (!cand.length) return { dwx, dwy };
+  let bestPt=null, bestX=null, bestY=null;
+  for (const o of orig){
+    const mx=o.x+dwx, my=o.y+dwy;
+    for (const cp of cand){
+      const ddx=cp.x-mx, ddy=cp.y-my;
+      if (Math.abs(ddx)<thr && Math.abs(ddy)<thr){
+        const dist=Math.hypot(ddx,ddy);
+        if (!bestPt || dist<bestPt.dist) bestPt={ddx,ddy,cx:cp.x,cy:cp.y,dist};
+      }
+      if (Math.abs(ddx)<thr && (!bestX || Math.abs(ddx)<Math.abs(bestX.ddx))) bestX={ddx,line:cp.x};
+      if (Math.abs(ddy)<thr && (!bestY || Math.abs(ddy)<Math.abs(bestY.ddy))) bestY={ddy,line:cp.y};
+    }
+  }
+  if (bestPt){ dwx+=bestPt.ddx; dwy+=bestPt.ddy; snapGuides.push({type:"pt", x:bestPt.cx, y:bestPt.cy}); }
+  else {
+    if (bestX){ dwx+=bestX.ddx; snapGuides.push({type:"vline", x:bestX.line}); }
+    if (bestY){ dwy+=bestY.ddy; snapGuides.push({type:"hline", y:bestY.line}); }
+  }
+  return { dwx, dwy };
+}
+
+// ===== Undo / Redo history (snapshots of `project`) =====
+let undoStack = [], redoStack = [];
+let gestureSnap = null;     // project state captured at the start of a mouse gesture
+function snap(){ return JSON.stringify(project); }
+function pushUndoSnapshot(s){
+  if (undoStack.length && undoStack[undoStack.length-1] === s) return;
+  undoStack.push(s);
+  if (undoStack.length > 60) undoStack.shift();
+  redoStack.length = 0;
+  updateUndoButtons();
+}
+function pushUndo(){ pushUndoSnapshot(snap()); }      // call BEFORE a mutation
+function commitGesture(){                              // call on mouseup: record if the gesture changed anything
+  if (gestureSnap !== null){
+    if (snap() !== gestureSnap) pushUndoSnapshot(gestureSnap);
+    gestureSnap = null;
+  }
+}
+function restoreSnapshot(s){
+  project = JSON.parse(s);
+  normalizeAllParts();
+  selectedPartId = null; selVertex = null; draft = null; drag = null; handleDrag = null; penDrag = null;
+  saveLocal(); render(); updateUndoButtons();
+}
+function undo(){ if (!undoStack.length) return; redoStack.push(snap()); restoreSnapshot(undoStack.pop()); }
+function redo(){ if (!redoStack.length) return; undoStack.push(snap()); restoreSnapshot(redoStack.pop()); }
+function updateUndoButtons(){
+  const u = document.getElementById("btn-undo"), r = document.getElementById("btn-redo");
+  if (u) u.disabled = !undoStack.length;
+  if (r) r.disabled = !redoStack.length;
+}
+
+// Find the vertex nearest to a screen point (across all parts), within a pixel threshold.
+function findVertexAt(sp){
+  let best = { d: Infinity, part: null, idx: -1 };
+  for (const part of project.parts){
+    for (let i=0;i<part.nodes.length;i++){
+      const s = worldToScreen(part.nodes[i]);
+      const d = Math.hypot(sp.x - s.x, sp.y - s.y);
+      if (d < best.d) best = { d, part, idx: i };
+    }
+  }
+  return best.d < 12 ? best : null;
+}
+// Find a bézier handle endpoint of the selected part near a screen point.
+function findHandleAt(sp){
+  if (!selectedPartId) return null;
+  const part = project.parts.find(p=>p.id===selectedPartId);
+  if (!part) return null;
+  let best = { d: Infinity, idx:-1, which:null };
+  part.nodes.forEach((nd,i)=>{
+    for (const which of ["in","out"]){
+      const h = which==="in" ? nd.hIn : nd.hOut;
+      if (!h) continue;
+      const s = worldToScreen({ x: nd.x + h.x, y: nd.y + h.y });
+      const d = Math.hypot(sp.x - s.x, sp.y - s.y);
+      if (d < best.d) best = { d, idx:i, which };
+    }
+  });
+  return best.d < 10 ? { part, idx: best.idx, which: best.which } : null;
+}
+
+// ===== Coordinate transforms (world mm <-> screen px) =====
+function worldToScreen(p){ return { x: p.x*view.scale + view.tx, y: p.y*view.scale + view.ty }; }
+function screenToWorld(px, py){ return { x: (px - view.tx)/view.scale, y: (py - view.ty)/view.scale }; }
+function svgPoint(evt){
+  const r = svgRect || (svgRect = svg.getBoundingClientRect());
+  return { x: evt.clientX - r.left, y: evt.clientY - r.top };
+}
+
+
+// ===== Geometry helpers =====
+function polygonArea(nodes){
+  let a = 0;
+  for (let i=0;i<nodes.length;i++){
+    const p = nodes[i], q = nodes[(i+1)%nodes.length];
+    a += p.x*q.y - q.x*p.y;
+  }
+  return a/2;
+}
+function centroid(nodes){
+  let x=0,y=0; for(const n of nodes){x+=n.x;y+=n.y;} return {x:x/nodes.length,y:y/nodes.length};
+}
+function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+// Offset a closed polygon by signed distance `d` (miter joins). sign convention handled by caller.
+function offsetPolygon(nodes, d){
+  const n = nodes.length;
+  if (n < 3) return null;
+  // Unit "right" normal of every edge.
+  const norm = [];
+  for (let i=0;i<n;i++){
+    const p = nodes[i], q = nodes[(i+1)%n];
+    let nx = q.y - p.y, ny = -(q.x - p.x);
+    const len = Math.hypot(nx, ny);
+    if (len < 1e-9){ norm.push(norm.length ? norm[norm.length-1] : {x:0,y:0}); continue; }
+    norm.push({ x: nx/len, y: ny/len });
+  }
+  // Miter offset: move each vertex along the bisector of its two edge normals.
+  // (Intersecting the offset lines directly blows up when consecutive segments are
+  //  nearly collinear - which is exactly what a flattened curve looks like.)
+  const out = [];
+  const maxLen = Math.abs(d) * 4;               // clamp so sharp corners don't spike
+  for (let i=0;i<n;i++){
+    const a = norm[(i-1+n)%n], b = norm[i];
+    let mx = a.x + b.x, my = a.y + b.y;
+    const mlen = Math.hypot(mx, my);
+    if (mlen < 1e-6){                            // 180° reversal: use the edge normal
+      out.push({ x: nodes[i].x + b.x*d, y: nodes[i].y + b.y*d });
+      continue;
+    }
+    mx /= mlen; my /= mlen;
+    const cos = mx*b.x + my*b.y;                 // = cos(half the turn angle)
+    let scale = (Math.abs(cos) < 1e-6) ? d : d/cos;
+    if (Math.abs(scale) > maxLen) scale = (scale < 0 ? -1 : 1) * maxLen;
+    out.push({ x: nodes[i].x + mx*scale, y: nodes[i].y + my*scale });
+  }
+  return out;
+}
+
+function intersectLines(l1, l2){
+  const denom = l1.dx*l2.dy - l1.dy*l2.dx;
+  if (Math.abs(denom) < 1e-9) return null;
+  const t = ((l2.px - l1.px)*l2.dy - (l2.py - l1.py)*l2.dx) / denom;
+  return { x: l1.px + t*l1.dx, y: l1.py + t*l1.dy };
+}
+// Outward offset: grow polygon by `d` mm regardless of winding.
+function outwardOffset(nodes, d){
+  const plus = offsetPolygon(nodes, d);
+  const minus = offsetPolygon(nodes, -d);
+  const ap = plus ? Math.abs(polygonArea(plus)) : -1;
+  const am = minus ? Math.abs(polygonArea(minus)) : -1;
+  return (ap >= am) ? plus : minus;
+}
+
+// ===== Curve support (explicit cubic Bézier handles, Affinity-style) =====
+// Each node carries hIn/hOut = control-handle OFFSETS from the anchor (or null for
+// a straight/corner side). A segment A->B curves via c1=A+A.hOut, c2=B+B.hIn.
+function nbNode(nodes, i, closed){
+  const n = nodes.length;
+  if (closed) return nodes[((i%n)+n)%n];
+  return nodes[Math.max(0, Math.min(n-1, i))];
+}
+function segControls(nodes, i, closed){
+  const n = nodes.length;
+  const A = nodes[i], B = nodes[(i+1)%n];
+  const c1 = A.hOut ? { x: A.x + A.hOut.x, y: A.y + A.hOut.y } : { x:A.x, y:A.y };
+  const c2 = B.hIn  ? { x: B.x + B.hIn.x,  y: B.y + B.hIn.y  } : { x:B.x, y:B.y };
+  return { A, B, c1, c2, straight: !A.hOut && !B.hIn };
+}
+// Auto handle offset for a node, tangent to its neighbors (used by corner<->smooth toggle).
+function autoHandle(nodes, i, closed){
+  const p0 = nbNode(nodes, i-1, closed), p2 = nbNode(nodes, i+1, closed);
+  return { x: (p2.x - p0.x)/6, y: (p2.y - p0.y)/6 };
+}
+function isCorner(node){ return !node.hIn && !node.hOut; }
+// Toggle a node between corner (no handles) and smooth (symmetric handles).
+function toggleNodeSmooth(nodes, i, closed){
+  const nd = nodes[i];
+  if (isCorner(nd)){
+    const t = autoHandle(nodes, i, closed);
+    nd.hOut = { x:t.x, y:t.y };
+    nd.hIn  = { x:-t.x, y:-t.y };
+  } else {
+    nd.hIn = null; nd.hOut = null;
+  }
+}
+// Normalize any part's nodes to the handle model (migrates old {x,y,smooth} data).
+function migratePart(part){
+  const nodes = part.nodes, n = nodes.length, closed = part.closed;
+  const migrated = nodes.some(nd => ('hIn' in nd) || ('hOut' in nd));
+  if (migrated){
+    nodes.forEach(nd => { if (!('hIn' in nd)) nd.hIn = null; if (!('hOut' in nd)) nd.hOut = null; });
+    return;
+  }
+  nodes.forEach((nd, i) => {
+    if (nd.smooth && n >= 2){
+      const p0 = nbNode(nodes, i-1, closed), p2 = nbNode(nodes, i+1, closed);
+      const t = { x:(p2.x-p0.x)/6, y:(p2.y-p0.y)/6 };
+      nd.hOut = { x:t.x, y:t.y }; nd.hIn = { x:-t.x, y:-t.y };
+    } else { nd.hOut = null; nd.hIn = null; }
+    delete nd.smooth;
+  });
+}
+function normalizeAllParts(){ if (!project.texts) project.texts=[]; for (const p of project.parts){ if (!p.notches) p.notches=[]; if (p.stitch==null) p.stitch=0; if (p.group===undefined) p.group=null; if (p.name==null) p.name=""; if (!p.color) p.color="#2563eb"; migratePart(p); } }
+function bezierAt(seg, u){
+  const mu = 1-u;
+  return {
+    x: mu*mu*mu*seg.A.x + 3*mu*mu*u*seg.c1.x + 3*mu*u*u*seg.c2.x + u*u*u*seg.B.x,
+    y: mu*mu*mu*seg.A.y + 3*mu*mu*u*seg.c1.y + 3*mu*u*u*seg.c2.y + u*u*u*seg.B.y
+  };
+}
+// Flatten, and record the exact index range each original segment occupies.
+function flattenNodesIndexed(nodes, closed, steps){
+  steps = steps || 16;
+  const n = nodes.length;
+  if (n < 2) return { pts: nodes.map(p=>({x:p.x,y:p.y})), range: [] };
+  const pts = [ { x:nodes[0].x, y:nodes[0].y } ];
+  const range = [];
+  const segCount = closed ? n : n-1;
+  for (let i=0;i<segCount;i++){
+    const startIdx = pts.length - 1;            // segment begins at the last point pushed
+    const sc = segControls(nodes, i, closed);
+    if (sc.straight) pts.push({ x:sc.B.x, y:sc.B.y });
+    else for (let t=1;t<=steps;t++) pts.push(bezierAt(sc, t/steps));
+    range.push({ start: startIdx, end: pts.length - 1 });
+  }
+  if (closed){
+    pts.pop();                                   // final point duplicates pts[0]
+    range[range.length-1].end = 0;               // ...so the last segment ends back at 0
+  }
+  return { pts, range };
+}
+// Build open polylines covering only the chosen segments (handles wrap-around).
+function stitchRuns(off, range, chosen, segCount){
+  const n = off.length, runs = [], done = new Set();
+  const norm = i => ((i % segCount) + segCount) % segCount;
+  const isCh = i => chosen.has(norm(i));
+  for (let i=0;i<segCount;i++){
+    if (!isCh(i) || done.has(i)) continue;
+    let s = i, guard = 0;                        // rewind to the start of this group
+    while (isCh(s-1) && guard++ < segCount) s = norm(s-1);
+    const group = [];
+    let cur = s, count = 0;
+    while (isCh(cur) && count < segCount){ const g = norm(cur); if (done.has(g)) break;
+      done.add(g); group.push(g); cur++; count++; }
+    if (!group.length) continue;
+    const from = range[group[0]].start, to = range[group[group.length-1]].end;
+    const run = []; let k = from;
+    for (let step=0; step<=n; step++){ run.push(off[k]); if (k===to) break; k = (k+1) % n; }
+    runs.push(run);
+  }
+  return runs;
+}
+// Which edge of ANY closed part is under the cursor?
+function findAnyEdgeAt(sp){
+  let best = { d: Infinity, part: null, i: -1 };
+  for (const part of project.parts){
+    if (!part.closed || part.kind || part.nodes.length < 3) continue;
+    const hit = findEdgeAt(sp, part.id);
+    if (hit){
+      const m = segMidWorld(part.nodes, hit.i, true);
+      const ms = worldToScreen(m);
+      const d = Math.hypot(sp.x-ms.x, sp.y-ms.y);
+      if (d < best.d) best = { d, part, i: hit.i };
+    }
+  }
+  return best.part ? best : null;
+}
+// Flatten a part outline to a fine world-space polyline (for offset / area).
+function flattenNodes(nodes, closed, steps){
+  steps = steps || 16;
+  const n = nodes.length;
+  if (n < 2) return nodes.map(p=>({x:p.x,y:p.y}));
+  const out = [ { x: nodes[0].x, y: nodes[0].y } ];
+  const segCount = closed ? n : n-1;
+  for (let i=0;i<segCount;i++){
+    const seg = segControls(nodes, i, closed);
+    if (seg.straight){ out.push({ x: seg.B.x, y: seg.B.y }); }
+    else { for (let t=1;t<=steps;t++) out.push(bezierAt(seg, t/steps)); }
+  }
+  if (closed) out.pop(); // last sample equals the first anchor
+  return out;
+}
+function segArcLength(nodes, i, closed){
+  const seg = segControls(nodes, i, closed);
+  if (seg.straight) return dist(seg.A, seg.B);
+  let L = 0, prev = seg.A;
+  for (let t=1;t<=24;t++){ const p = bezierAt(seg, t/24); L += dist(prev, p); prev = p; }
+  return L;
+}
+function segMidWorld(nodes, i, closed){
+  const seg = segControls(nodes, i, closed);
+  return seg.straight ? { x:(seg.A.x+seg.B.x)/2, y:(seg.A.y+seg.B.y)/2 } : bezierAt(seg, 0.5);
+}
+// Build an SVG path string in screen space from a nodes array.
+function nodesScreenPath(nodes, closed){
+  const n = nodes.length;
+  const s0 = worldToScreen(nodes[0]);
+  let d = "M"+s0.x.toFixed(1)+" "+s0.y.toFixed(1);
+  const segCount = closed ? n : n-1;
+  for (let i=0;i<segCount;i++){
+    const seg = segControls(nodes, i, closed);
+    const B = worldToScreen(seg.B);
+    if (seg.straight){ d += " L"+B.x.toFixed(1)+" "+B.y.toFixed(1); }
+    else {
+      const c1 = worldToScreen(seg.c1), c2 = worldToScreen(seg.c2);
+      d += " C"+c1.x.toFixed(1)+" "+c1.y.toFixed(1)+" "+c2.x.toFixed(1)+" "+c2.y.toFixed(1)+" "+B.x.toFixed(1)+" "+B.y.toFixed(1);
+    }
+  }
+  if (closed) d += " Z";
+  return d;
+}
+function partScreenPath(part){ return nodesScreenPath(part.nodes, part.closed); }
+// Insert a node onto the outline nearest to a world point (returns new index or -1).
+function insertNodeAt(part, wp){
+  const nodes = part.nodes, closed = part.closed, n = nodes.length;
+  const segCount = closed ? n : n-1;
+  let best = { d: Infinity, i: -1, pt: null };
+  for (let i=0;i<segCount;i++){
+    const a = nodes[i], b = nodes[(i+1)%n];
+    const abx = b.x-a.x, aby = b.y-a.y;
+    const len2 = abx*abx + aby*aby || 1;
+    let t = ((wp.x-a.x)*abx + (wp.y-a.y)*aby)/len2;
+    t = Math.max(0, Math.min(1, t));
+    const proj = { x: a.x + abx*t, y: a.y + aby*t };
+    const dd = dist(wp, proj);
+    if (dd < best.d) best = { d: dd, i, pt: proj };
+  }
+  if (best.i < 0) return -1;
+  nodes.splice(best.i+1, 0, { x: Math.round(best.pt.x), y: Math.round(best.pt.y), hIn:null, hOut:null });
+  return best.i+1;
+}
+// Inner offset: shrink polygon by `d` mm (for topstitch lines) regardless of winding.
+function innerOffset(nodes, d){
+  const plus = offsetPolygon(nodes, d);
+  const minus = offsetPolygon(nodes, -d);
+  const ap = plus ? Math.abs(polygonArea(plus)) : Infinity;
+  const am = minus ? Math.abs(polygonArea(minus)) : Infinity;
+  return (ap <= am) ? plus : minus;
+}
+// Nearest point on a flattened outline to a world point; returns point + unit tangent + distance.
+function nearestOnOutline(flat, wp, closed){
+  const n = flat.length;
+  const segCount = closed ? n : n-1;
+  let best = { d: Infinity, pt: null, tx: 1, ty: 0 };
+  for (let i=0;i<segCount;i++){
+    const a = flat[i], b = flat[(i+1)%n];
+    const abx = b.x-a.x, aby = b.y-a.y;
+    const len2 = abx*abx + aby*aby || 1;
+    let t = ((wp.x-a.x)*abx + (wp.y-a.y)*aby)/len2;
+    t = Math.max(0, Math.min(1, t));
+    const proj = { x: a.x+abx*t, y: a.y+aby*t };
+    const dd = dist(wp, proj);
+    if (dd < best.d){ const L = Math.sqrt(len2); best = { d: dd, pt: proj, tx: abx/L, ty: aby/L }; }
+  }
+  return best;
+}
+
+// ===== Snapping =====
+function maybeSnap(p){
+  if (!document.getElementById("chk-snap").checked) return p;
+  const g = Math.max(1, parseFloat(document.getElementById("grid-size").value) || 10);
+  return { x: Math.round(p.x/g)*g, y: Math.round(p.y/g)*g };
+}
+
+// ===== Rendering =====
+const MODE_INFO = {
+  draw:    { icon:"✏️", name:"描くモード" },
+  rect:    { icon:"▭",  name:"四角モード" },
+  ellipse: { icon:"◯",  name:"円モード" },
+  text:    { icon:"T",  name:"文字モード" },
+  stitch:  { icon:"🧵", name:"ステッチモード" },
+  arrow:   { icon:"↗",  name:"矢印モード" },
+  dim:     { icon:"📏", name:"寸法線モード" },
+  select:  { icon:"⬚",  name:"選択・編集モード" },
+  notch:   { icon:"⊹",  name:"合印モード" },
+  pan:     { icon:"✋",  name:"移動モード" }
+};
+function updateModeBadge(){
+  const m = MODE_INFO[tool] || { icon:"", name:tool };
+  const badge = document.getElementById("mode-badge");
+  badge.textContent = `${m.icon} ${m.name}`;
+  svg.setAttribute("class", "mode-" + tool);
+}
+function updateContextBar(){
+  document.getElementById("ctx-common").classList.add("show");
+  document.getElementById("ctx-edit").classList.toggle("show", tool==="select");
+  document.getElementById("ctx-shape").classList.toggle("show", tool==="rect" || tool==="ellipse");
+  document.getElementById("ctx-text").classList.toggle("show", tool==="text");
+  document.getElementById("ctx-stitch").classList.toggle("show", tool==="stitch");
+}
+function updateActionBar(){
+  const bar = document.getElementById("action-bar");
+  const show = tool==="select" && multiSel.length>0;
+  bar.classList.toggle("show", show);
+  if (!show) return;
+  const whole = wholePartSelected();
+  const ids = [...new Set(multiSel.map(m=>m.partId))];
+  // duplicate makes most sense on a whole part
+  document.getElementById("ab-dup").style.display = (whole || ids.length>=2) ? "" : "none";
+  // grouping: available when 2+ parts selected; ungroup when any selected part is grouped
+  const anyGrouped = ids.some(id=>{ const p=project.parts.find(pp=>pp.id===id); return p && p.group; });
+  document.getElementById("ab-group").style.display   = ids.length>=2 ? "" : "none";
+  document.getElementById("ab-ungroup").style.display = anyGrouped ? "" : "none";
+}
+
+function renderShapePreview(){
+  if (!shapeDrag) return;
+  const a = shapeDrag.start, b = maybeSnap(mouseWorld);
+  if (tool==="arrow"){
+    const sa = worldToScreen(a), sb = worldToScreen(b);
+    gDraft.appendChild(mk("path", { d:`M${sa.x} ${sa.y} L${sb.x} ${sb.y}`, class:"arrowline", stroke:"#2563eb", "marker-end":"url(#arrowhead)" }));
+    return;
+  }
+  if (tool==="dim"){
+    const c = snapToVertex(mouseWorld);
+    const sa = worldToScreen(a), sb = worldToScreen(c);
+    gDraft.appendChild(mk("path", { d:`M${sa.x} ${sa.y} L${sb.x} ${sb.y}`, class:"dimline", stroke:"#2563eb",
+      "marker-start":"url(#arrowhead)", "marker-end":"url(#arrowhead)" }));
+    const t = mk("text", { x:(sa.x+sb.x)/2, y:(sa.y+sb.y)/2-8, class:"dimtext", fill:"#2563eb", "text-anchor":"middle" });
+    t.textContent = Math.round(Math.hypot(c.x-a.x, c.y-a.y)) + "mm";
+    gDraft.appendChild(t);
+    return;
+  }
+  const nodes = (tool==="rect") ? rectNodes(a,b) : ellipseNodes(a,b);
+  gDraft.appendChild(mk("path", { d: nodesScreenPath(nodes, true), class:"draft-line", "stroke-dasharray":"5 4" }));
+  const wmm=Math.round(Math.abs(a.x-b.x)), hmm=Math.round(Math.abs(a.y-b.y));
+  const mid=worldToScreen({ x:(a.x+b.x)/2, y:(a.y+b.y)/2 });
+  const t=mk("text", { x:mid.x, y:mid.y, class:"edge-len", "text-anchor":"middle", "dominant-baseline":"middle" });
+  t.textContent = `${wmm}×${hmm}`; gDraft.appendChild(t);
+}
+function renderSnapGuides(){
+  if (!snapGuides.length) return;
+  const w=vpW, h=vpH;
+  for (const g of snapGuides){
+    if (g.type==="vline"){ const s=worldToScreen({x:g.x,y:0}); gHandles.appendChild(mk("line",{x1:s.x,y1:0,x2:s.x,y2:h,class:"snap-guide"})); }
+    else if (g.type==="hline"){ const s=worldToScreen({x:0,y:g.y}); gHandles.appendChild(mk("line",{x1:0,y1:s.y,x2:w,y2:s.y,class:"snap-guide"})); }
+    else if (g.type==="pt"){ const s=worldToScreen({x:g.x,y:g.y}); gHandles.appendChild(mk("circle",{cx:s.x,cy:s.y,r:5,class:"snap-pt"})); }
+  }
+}
+function render(){
+  renderGrid();
+  renderParts();
+  renderTexts();       // text labels/annotations
+  renderDraft();       // ends by calling renderHandles() (clears gHandles)
+  renderShapePreview();// rectangle/ellipse preview
+  renderSelection();   // appends the 選択-tool overlay onto gHandles
+  renderSnapGuides();  // magnet guide lines/points
+  // the parts list can't change mid-drag - skip the DOM rebuild for smoothness
+  if (!suppressListRender && !selMove && !handleDrag && !penDrag && !textDrag && !marquee && !shapeDrag && !drag) renderPartList();
+  updateHint();
+  updateModeBadge();
+  updateContextBar();
+  updateActionBar();
+  document.getElementById("readout").textContent =
+    `X:${Math.round(mouseWorld.x)} Y:${Math.round(mouseWorld.y)}mm ・ ${Math.round(view.scale*40)}%`;
+}
+
+// Overlay for the 選択 tool: every anchor as a small square (selected ones highlighted) + marquee box.
+function renderSelection(){
+  if (tool!=="select") return;
+  const frag = document.createDocumentFragment();
+  // only show anchors for the selection (or every anchor while rubber-band selecting)
+  const selIds = new Set(multiSel.map(m=>m.partId));
+  if (selectedPartId) selIds.add(selectedPartId);
+  for (const part of project.parts){
+    if (!marquee && !selIds.has(part.id)) continue;
+    part.nodes.forEach((nd,i)=>{
+      const s = worldToScreen(nd);
+      const on = multiSel.some(m=>m.partId===part.id && m.idx===i);
+      frag.appendChild(mk("rect", { x:s.x-4, y:s.y-4, width:8, height:8, class:"selpt"+(on?" on":"") }));
+    });
+  }
+  // middle-of-edge handles on the selected part: grab one to move that edge
+  const selPart = selectedPartId && project.parts.find(p=>p.id===selectedPartId);
+  if (selPart && !marquee && selPart.nodes.length>=2){
+    const n = selPart.nodes.length, segCount = selPart.closed ? n : n-1;
+    for (let i=0;i<segCount;i++){
+      const m = segMidWorld(selPart.nodes, i, selPart.closed);
+      const s = worldToScreen(m);
+      const hot = hoverEdge && hoverEdge.partId===selPart.id && hoverEdge.i===i;
+      frag.appendChild(mk("circle", { cx:s.x, cy:s.y, r: hot?6.5:4.5, class:"midpt"+(hot?" hot":"") }));
+    }
+  }
+  // selected text
+  if (selTextId){
+    const t = project.texts.find(x=>x.id===selTextId);
+    if (t){
+      const b = textBox(t);
+      const p0 = worldToScreen({x:b.x0,y:b.y0}), p1 = worldToScreen({x:b.x1,y:b.y1});
+      frag.appendChild(mk("rect", { x:Math.min(p0.x,p1.x)-3, y:Math.min(p0.y,p1.y)-3,
+        width:Math.abs(p1.x-p0.x)+6, height:Math.abs(p1.y-p0.y)+6, class:"text-sel" }));
+    }
+  }
+  // grabbable edge under the cursor
+  if (hoverEdge){
+    const part = project.parts.find(p=>p.id===hoverEdge.partId);
+    if (part){
+      const seg = segControls(part.nodes, hoverEdge.i, part.closed);
+      const A=worldToScreen(seg.A), B=worldToScreen(seg.B);
+      let d;
+      if (seg.straight) d = `M${A.x} ${A.y} L${B.x} ${B.y}`;
+      else { const c1=worldToScreen(seg.c1), c2=worldToScreen(seg.c2);
+             d = `M${A.x} ${A.y} C${c1.x} ${c1.y} ${c2.x} ${c2.y} ${B.x} ${B.y}`; }
+      frag.appendChild(mk("path", { d, class:"edge-hover" }));
+    }
+  }
+  if (marquee){
+    const x=Math.min(marquee.x0,marquee.x1), y=Math.min(marquee.y0,marquee.y1);
+    const w=Math.abs(marquee.x1-marquee.x0), h=Math.abs(marquee.y1-marquee.y0);
+    frag.appendChild(mk("rect", { x, y, width:w, height:h, class:"marquee" }));
+  }
+  gHandles.appendChild(frag);
+}
+
+function renderGrid(){
+  gGrid.innerHTML = "";
+  const g = Math.max(1, parseFloat(document.getElementById("grid-size").value) || 10);
+  const w = vpW, h = vpH;
+  const tl = screenToWorld(0,0), br = screenToWorld(w,h);
+  const stepPx = g*view.scale;
+  if (stepPx < 4) return; // too dense
+  const startX = Math.floor(tl.x/g)*g, endX = Math.ceil(br.x/g)*g;
+  const startY = Math.floor(tl.y/g)*g, endY = Math.ceil(br.y/g)*g;
+  const frag = document.createDocumentFragment();
+  for (let x=startX; x<=endX; x+=g){
+    const s = worldToScreen({x, y:0});
+    const line = mk("line", { x1:s.x, y1:0, x2:s.x, y2:h, class: "grid-line" + (x%(g*10)===0?" major":"") });
+    frag.appendChild(line);
+  }
+  for (let y=startY; y<=endY; y+=g){
+    const s = worldToScreen({x:0, y});
+    const line = mk("line", { x1:0, y1:s.y, x2:w, y2:s.y, class: "grid-line" + (y%(g*10)===0?" major":"") });
+    frag.appendChild(line);
+  }
+  // axes
+  const o = worldToScreen({x:0,y:0});
+  frag.appendChild(mk("line",{x1:o.x,y1:0,x2:o.x,y2:h,class:"axis"}));
+  frag.appendChild(mk("line",{x1:0,y1:o.y,x2:w,y2:o.y,class:"axis"}));
+  gGrid.appendChild(frag);
+}
+
+function screenPath(nodes, closed){
+  return nodes.map((n,i)=>{ const s=worldToScreen(n); return (i===0?"M":"L")+s.x.toFixed(1)+" "+s.y.toFixed(1); }).join(" ") + (closed?" Z":"");
+}
+
+function renderParts(){
+  gParts.innerHTML = "";
+  const showDim = document.getElementById("chk-dim").checked;
+  const frag = document.createDocumentFragment();
+  for (const part of project.parts){
+    if (part.nodes.length < 2) continue;
+    // stitch line: an open dashed path (no fill, no seam/label)
+    if (part.kind==="stitch"){
+      frag.appendChild(mk("path", { d: nodesScreenPath(part.nodes, false), class:"stitchline", stroke: part.color, "data-part": part.id }));
+      continue;
+    }
+    // dimension: arrows at both ends + the measured length, recomputed live
+    if (part.kind==="dim"){
+      const A=part.nodes[0], B=part.nodes[1];
+      const sa=worldToScreen(A), sb=worldToScreen(B);
+      frag.appendChild(mk("path", { d:`M${sa.x} ${sa.y} L${sb.x} ${sb.y}`, class:"dimline", stroke:part.color,
+        "marker-start":"url(#arrowhead)", "marker-end":"url(#arrowhead)", "data-part":part.id }));
+      // short perpendicular ticks at each end
+      let ux=B.x-A.x, uy=B.y-A.y; const L=Math.hypot(ux,uy)||1; ux/=L; uy/=L;
+      const px=-uy, py=ux, t=5;
+      for (const [q,ss] of [[A,sa],[B,sb]]){
+        const p1=worldToScreen({x:q.x+px*t, y:q.y+py*t}), p2=worldToScreen({x:q.x-px*t, y:q.y-py*t});
+        frag.appendChild(mk("line", { x1:p1.x, y1:p1.y, x2:p2.x, y2:p2.y, class:"dimtick", stroke:part.color }));
+      }
+      const mid={x:(sa.x+sb.x)/2, y:(sa.y+sb.y)/2};
+      const off=worldToScreen({x:(A.x+B.x)/2+px*7, y:(A.y+B.y)/2+py*7});
+      const lbl=mk("text", { x:off.x, y:off.y, class:"dimtext", fill:part.color, "text-anchor":"middle" });
+      lbl.textContent = Math.round(L) + "mm";
+      frag.appendChild(lbl);
+      continue;
+    }
+    // arrow: an open path with an arrowhead (grain direction / leader line)
+    if (part.kind==="arrow"){
+      frag.appendChild(mk("path", { d: nodesScreenPath(part.nodes, false), class:"arrowline", stroke: part.color,
+        "marker-end": "url(#arrowhead)", "data-part": part.id }));
+      continue;
+    }
+    const selected = part.id === selectedPartId;
+    const flat = flattenNodes(part.nodes, part.closed);
+    // seam allowance (draw first, underneath) — offset the flattened outline
+    if (part.closed && part.seam > 0 && part.nodes.length >= 3){
+      const off = outwardOffset(flat, part.seam);
+      if (off){
+        frag.appendChild(mk("path", { d: screenPath(off, true), class: "seam-line", stroke: part.color }));
+      }
+    }
+    // topstitch line — inner parallel dotted line (whole outline, or just chosen edges)
+    if (part.closed && part.stitch > 0 && part.nodes.length >= 3){
+      const fi = flattenNodesIndexed(part.nodes, true);
+      const inner = innerOffset(fi.pts, part.stitch);
+      if (inner){
+        if (!part.stitchEdges || !part.stitchEdges.length){
+          frag.appendChild(mk("path", { d: screenPath(inner, true), class:"stitch-line", stroke: STITCH_COLOR }));
+        } else {
+          const chosen = new Set(part.stitchEdges);
+          for (const run of stitchRuns(inner, fi.range, chosen, part.nodes.length)){
+            frag.appendChild(mk("path", { d: screenPath(run, false), class:"stitch-line", stroke: STITCH_COLOR }));
+          }
+        }
+      }
+    }
+    // outline (curved where nodes are smooth)
+    const path = mk("path", {
+      d: partScreenPath(part),
+      class: "part-outline" + (selected?" selected":""),
+      fill: part.color, stroke: part.color,
+      "data-part": part.id
+    });
+    frag.appendChild(path);
+    // edge length labels (arc length for curved segments)
+    if (showDim){
+      const count = part.closed ? part.nodes.length : part.nodes.length-1;
+      const c = centroid(part.nodes);
+      for (let i=0;i<count;i++){
+        const len = segArcLength(part.nodes, i, part.closed);
+        const midW = segMidWorld(part.nodes, i, part.closed);
+        const mid = worldToScreen(midW);
+        let ox = midW.x - c.x, oy = midW.y - c.y; const ol = Math.hypot(ox,oy)||1;
+        const t = mk("text", { x: mid.x + ox/ol*12, y: mid.y + oy/ol*12, class:"edge-len", "text-anchor":"middle", "dominant-baseline":"middle" });
+        t.textContent = Math.round(len) + "";
+        frag.appendChild(t);
+      }
+    }
+    // notches (match marks) — perpendicular ticks straddling the outline
+    if (part.notches && part.notches.length){
+      const half = 6; // mm each side of the outline
+      for (const nt of part.notches){
+        const near = nearestOnOutline(flat, nt, part.closed);
+        const px = -near.ty, py = near.tx; // perpendicular unit vector
+        const a = worldToScreen({ x: near.pt.x - px*half, y: near.pt.y - py*half });
+        const b = worldToScreen({ x: near.pt.x + px*half, y: near.pt.y + py*half });
+        frag.appendChild(mk("line", { x1:a.x, y1:a.y, x2:b.x, y2:b.y, class:"notch", stroke: part.color, "data-notch":"1" }));
+      }
+    }
+    // name label at centroid — only when the user has actually named the part
+    if (part.closed && part.name && part.name.trim()){
+      const c = worldToScreen(centroid(part.nodes));
+      const lbl = mk("text", { x:c.x, y:c.y, class:"part-name-label", "text-anchor":"middle" });
+      lbl.textContent = part.name + (part.qty>1?` ×${part.qty}`:"");
+      frag.appendChild(lbl);
+    }
+  }
+  gParts.appendChild(frag);
+}
+
+// Draw an anchor + its bézier handle lines/endpoints into a fragment.
+function drawNodeGizmo(frag, node, extraCls){
+  const a = worldToScreen(node);
+  for (const which of ["in","out"]){
+    const h = which==="in" ? node.hIn : node.hOut;
+    if (!h) continue;
+    const hp = worldToScreen({ x: node.x + h.x, y: node.y + h.y });
+    frag.appendChild(mk("line", { x1:a.x, y1:a.y, x2:hp.x, y2:hp.y, class:"handle-line" }));
+    frag.appendChild(mk("circle", { cx:hp.x, cy:hp.y, r:4, class:"handle-dot" }));
+  }
+  const cls = "vertex" + (extraCls||"");
+  if (isCorner(node)) frag.appendChild(mk("rect", { x:a.x-5, y:a.y-5, width:10, height:10, class:cls }));
+  else frag.appendChild(mk("circle", { cx:a.x, cy:a.y, r:6, class:cls }));
+}
+
+function renderDraft(){
+  gDraft.innerHTML = "";
+  if (!draft || draft.nodes.length === 0) { renderHandles(); return; }
+  const frag = document.createDocumentFragment();
+  const nodes = draft.nodes;
+  // committed part of the curve so far
+  frag.appendChild(mk("path", { d: nodesScreenPath(nodes, false), class:"draft-line" }));
+  // rubber-band preview from the last node to the cursor (curved by its out-handle)
+  if (!penDrag){
+    const last = nodes[nodes.length-1];
+    const c1 = last.hOut ? { x:last.x+last.hOut.x, y:last.y+last.hOut.y } : last;
+    const ls = worldToScreen(last), cs = worldToScreen(c1), ms = worldToScreen(mouseWorld);
+    frag.appendChild(mk("path", { d:`M${ls.x.toFixed(1)} ${ls.y.toFixed(1)} C${cs.x.toFixed(1)} ${cs.y.toFixed(1)} ${ms.x.toFixed(1)} ${ms.y.toFixed(1)} ${ms.x.toFixed(1)} ${ms.y.toFixed(1)}`, class:"draft-line", "stroke-dasharray":"4 4", opacity:0.55 }));
+  }
+  for (const n of nodes) drawNodeGizmo(frag, n);
+  // start marker (close target)
+  const s0 = worldToScreen(nodes[0]);
+  frag.appendChild(mk("circle", { cx:s0.x, cy:s0.y, r:8, class:"start-marker" }));
+  gDraft.appendChild(frag);
+  renderHandles();
+}
+
+function renderHandles(){
+  gHandles.innerHTML = "";
+  if (tool !== "select" || !selectedPartId) return;
+  const part = project.parts.find(p=>p.id===selectedPartId);
+  if (!part) return;
+  const frag = document.createDocumentFragment();
+  part.nodes.forEach((n,i)=>{
+    let cls = drag&&drag.index===i ? " dragging" : "";
+    if (selVertex && selVertex.partId===part.id && selVertex.idx===i) cls += " sel";
+    drawNodeGizmo(frag, n, cls);
+  });
+  gHandles.appendChild(frag);
+}
+
+function renderPartList(){
+  const list = document.getElementById("part-list");
+  const note = document.getElementById("empty-note");
+  list.innerHTML = "";
+  // fabric pieces only - stitch lines and arrows are edited by right-clicking them on the drawing
+  const pieces = project.parts.filter(p => !p.kind);
+  note.style.display = pieces.length ? "none" : "block";
+  for (const part of pieces){
+    const div = document.createElement("div");
+    div.className = "part-item" + (part.id===selectedPartId?" selected":"");
+    div.dataset.part = part.id;
+    div.innerHTML = `
+      <div class="row">
+        <span class="grip" draggable="true" title="ドラッグで並び替え">⋮⋮</span>
+        <input data-field="name" value="${escapeHtml(part.name||'')}" placeholder="名前を入力">
+        <button class="del" title="このパーツを削除">🗑</button>
+      </div>
+      ${part.group ? `<div class="row"><span style="font-size:11px;color:#7c3aed">🔗 グループ ${part.group.slice(-4)}</span></div>` : ""}
+    `;
+    list.appendChild(div);
+  }
+}
+
+
+function updateHint(){
+  const hint = document.getElementById("hint");
+  const w = mouseWorld;
+  let msg = `X:${Math.round(w.x)} Y:${Math.round(w.y)} mm`;
+  if (tool==="draw"){
+    msg += draft&&draft.nodes.length ? " ・ クリック=角 / ドラッグ=曲線 / 緑の丸で閉じる（Enter確定）" : " ・ クリック=角 / ドラッグして曲線を描き始め";
+  } else if (tool==="rect"){
+    msg += " ・ ドラッグで四角形を描く";
+  } else if (tool==="ellipse"){
+    msg += " ・ ドラッグで円（楕円）を描く";
+  } else if (tool==="text"){
+    msg += " ・ クリックで文字を入力 / 文字をクリックで編集・ドラッグで移動（空欄で確定すると削除）";
+  } else if (tool==="stitch"){
+    msg += draft&&draft.nodes.length ? " ・ クリックで点を追加 / ドラッグ=曲線 / Enter・ダブルクリックで確定" : " ・ 辺をクリック＝その辺だけ内側に点線（もう一度で解除）／ 空きからクリックで自由に線を引く";
+  } else if (tool==="arrow"){
+    msg += " ・ ドラッグで矢印（地の目・引き出し線）を引く";
+  } else if (tool==="dim"){
+    msg += " ・ 測りたい2点をドラッグ（角に近づくとその点にぴたっと合います）";
+
+  } else if (tool==="select"){
+    msg += multiSel.length
+      ? " ・ 白い■=点をドラッグ / オレンジ●=辺の中央、つかむと辺ごと動く / ダブルクリック=角↔曲線 / Shift+クリック=点追加 / 右クリック=色・削除"
+      : " ・ パーツ/文字をクリックで選択（文字はダブルクリックで編集）・ 空きをドラッグで囲んで選択";
+  } else if (tool==="notch"){
+    msg += " ・ 輪郭付近をクリックで合印を追加 / 右クリックで削除";
+  } else if (tool==="pan"){
+    msg += " ・ ドラッグで画面移動";
+  }
+  hint.textContent = msg;
+}
+
+// small helpers
+function mk(tag, attrs){
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+// ===== Parts management =====
+const DEFAULT_COLOR = "#2563eb"; // all parts start blue; changeable per part
+function newPart(nodes, closed){
+  const part = { id: "p"+(idCounter++), name: "", qty: 1, fabric: "", color: DEFAULT_COLOR, seam: 0, stitch: 0, closed: !!closed, group: null, nodes, notches: [] };
+  migratePart(part);
+  project.parts.push(part);
+  selectedPartId = part.id;
+  saveLocal();
+  return part;
+}
+function deletePart(id){
+  pushUndo();
+  project.parts = project.parts.filter(p=>p.id!==id);
+  if (selectedPartId===id) selectedPartId = null;
+  saveLocal(); render();
+}
+// Duplicate a part, offset by (dx,dy) mm, as a new selected part.
+function duplicatePart(part, dx, dy){
+  const copy = JSON.parse(JSON.stringify(part));
+  copy.id = "p"+(idCounter++);
+  copy.group = null; // a fresh copy isn't part of the source's group
+  copy.name = part.name ? part.name + "（複製）" : "";
+  copy.nodes = copy.nodes.map(nd => ({ x:nd.x+dx, y:nd.y+dy, hIn:nd.hIn, hOut:nd.hOut }));
+  if (copy.notches) copy.notches = copy.notches.map(p => ({ x:p.x+dx, y:p.y+dy }));
+  project.parts.push(copy);
+  selectedPartId = copy.id;
+  return copy;
+}
+// Rotate a part in place by `deg` degrees around its centroid (rotates handles + notches too).
+function rotatePart(part, deg){
+  const rad = deg*Math.PI/180, cos = Math.cos(rad), sin = Math.sin(rad);
+  const c = centroid(part.nodes);
+  const rot = (p)=>({ x: c.x + (p.x-c.x)*cos - (p.y-c.y)*sin, y: c.y + (p.x-c.x)*sin + (p.y-c.y)*cos });
+  const rotOff = (o)=> o ? { x: o.x*cos - o.y*sin, y: o.x*sin + o.y*cos } : null;
+  part.nodes = part.nodes.map(nd => { const p = rot(nd); return { x:p.x, y:p.y, hIn:rotOff(nd.hIn), hOut:rotOff(nd.hOut) }; });
+  if (part.notches) part.notches = part.notches.map(rot);
+}
+// Flip a part in place. axis: "h" = left-right (mirror X), "v" = up-down (mirror Y).
+function flipPart(part, axis){
+  const c = centroid(part.nodes);
+  const flip = (p)=> axis==="h" ? { x: 2*c.x - p.x, y: p.y } : { x: p.x, y: 2*c.y - p.y };
+  const flipOff = (o)=> o ? (axis==="h" ? { x:-o.x, y:o.y } : { x:o.x, y:-o.y }) : null;
+  part.nodes = part.nodes.map(nd => { const p = flip(nd); return { x:p.x, y:p.y, hIn:flipOff(nd.hIn), hOut:flipOff(nd.hOut) }; });
+  if (part.notches) part.notches = part.notches.map(flip);
+}
+// Round a corner node with a tangent circular arc (fillet) of the given radius.
+function filletNode(part, idx, radius){
+  const nodes = part.nodes, n = nodes.length, closed = part.closed;
+  if (n < 3) return false;
+  if (!closed && (idx===0 || idx===n-1)) return false; // endpoints of an open path have one edge
+  const cur = nodes[idx];
+  const prev = nbNode(nodes, idx-1, closed);
+  const next = nbNode(nodes, idx+1, closed);
+  let v1 = { x: prev.x-cur.x, y: prev.y-cur.y }; const l1 = Math.hypot(v1.x,v1.y);
+  let v2 = { x: next.x-cur.x, y: next.y-cur.y }; const l2 = Math.hypot(v2.x,v2.y);
+  if (l1<1e-6 || l2<1e-6) return false;
+  v1 = { x:v1.x/l1, y:v1.y/l1 }; v2 = { x:v2.x/l2, y:v2.y/l2 };
+  const dot = Math.max(-1, Math.min(1, v1.x*v2.x + v1.y*v2.y));
+  const angle = Math.acos(dot); // angle between the two edges at the corner
+  if (angle < 0.01 || Math.PI-angle < 0.01) return false; // nearly straight
+  let d = radius / Math.tan(angle/2);           // distance from corner to each tangent point
+  d = Math.min(d, l1*0.98, l2*0.98);            // clamp so tangent points stay on the edges
+  const R = d * Math.tan(angle/2);              // actual radius after clamping
+  const arcAngle = Math.PI - angle;             // arc sweep
+  const k = (4/3) * Math.tan(arcAngle/4) * R;   // cubic-bézier handle length for a circular arc
+  const T1 = { x: cur.x + v1.x*d, y: cur.y + v1.y*d };
+  const T2 = { x: cur.x + v2.x*d, y: cur.y + v2.y*d };
+  const nodeA = { x:T1.x, y:T1.y, hIn:null,                       hOut:{ x:-v1.x*k, y:-v1.y*k } };
+  const nodeB = { x:T2.x, y:T2.y, hIn:{ x:-v2.x*k, y:-v2.y*k },  hOut:null };
+  nodes.splice(idx, 1, nodeA, nodeB);
+  return true;
+}
+function findPartAt(worldPt){
+  // hit test: inside polygon
+  for (let i=project.parts.length-1;i>=0;i--){
+    const part = project.parts[i];
+    if (part.closed && part.nodes.length>=3 && pointInPoly(worldPt, part.nodes)) return part;
+  }
+  return null;
+}
+// Snap a point onto a nearby part vertex, else fall back to the grid.
+function snapToVertex(wp){
+  const thr = 12 / view.scale;
+  let best = { d: thr, pt: null };
+  for (const part of project.parts){
+    for (const nd of part.nodes){
+      const d = Math.hypot(nd.x-wp.x, nd.y-wp.y);
+      if (d < best.d) best = { d, pt: { x:nd.x, y:nd.y } };
+    }
+  }
+  return best.pt || maybeSnap(wp);
+}
+// Distance from a point to a line segment.
+function distToSeg(p, a, b){
+  const abx=b.x-a.x, aby=b.y-a.y, len2=abx*abx+aby*aby||1;
+  let t=((p.x-a.x)*abx+(p.y-a.y)*aby)/len2; t=Math.max(0,Math.min(1,t));
+  return Math.hypot(p.x-(a.x+abx*t), p.y-(a.y+aby*t));
+}
+// Which edge (segment) of a part is under the cursor? Returns {part, i} (segment starts at node i).
+function findEdgeAt(sp, partId){
+  const part = project.parts.find(p=>p.id===partId);
+  if (!part || part.nodes.length<2) return null;
+  const wp = screenToWorld(sp.x, sp.y);
+  const thr = 10 / view.scale;
+  const n = part.nodes.length, segCount = part.closed ? n : n-1;
+  let best = { d: Infinity, i: -1 };
+  for (let i=0;i<segCount;i++){
+    const seg = segControls(part.nodes, i, part.closed);
+    let prev = seg.A;
+    for (let t=1;t<=10;t++){
+      const q = seg.straight
+        ? { x: seg.A.x+(seg.B.x-seg.A.x)*t/10, y: seg.A.y+(seg.B.y-seg.A.y)*t/10 }
+        : bezierAt(seg, t/10);
+      const d = distToSeg(wp, prev, q);
+      if (d < best.d) best = { d, i };
+      prev = q;
+    }
+  }
+  return best.d < thr ? { part, i: best.i } : null;
+}
+// Hit-test open paths (stitch lines / arrows) by proximity to the line itself.
+function findLinePartAt(wp){
+  const thr = 14 / view.scale;   // generous: thin lines are hard to hit exactly
+  let best = { d: Infinity, part: null };
+  for (const part of project.parts){
+    if (part.closed || part.nodes.length < 2) continue;
+    const flat = flattenNodes(part.nodes, false);
+    const near = nearestOnOutline(flat, wp, false);
+    if (near.d < thr && near.d < best.d) best = { d: near.d, part };
+  }
+  return best.part;
+}
+function pointInPoly(pt, poly){
+  let inside=false;
+  for (let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const xi=poly[i].x, yi=poly[i].y, xj=poly[j].x, yj=poly[j].y;
+    if (((yi>pt.y)!==(yj>pt.y)) && (pt.x < (xj-xi)*(pt.y-yi)/(yj-yi)+xi)) inside=!inside;
+  }
+  return inside;
+}
+
+// ===== Tool switching =====
+function setTool(t){
+  if (editingTextId!=null && typeof commitTextEditor==="function") commitTextEditor();
+  if (draft && draft.nodes.length && t!==tool) commitDraft();
+  if (typeof filletReset==="function") filletReset();
+  tool = t;
+  if (t!=="select"){ multiSel = []; marquee = null; selMove = null; }
+  if (t!=="select" && t!=="text") selTextId = null;
+  document.querySelectorAll("button.tool").forEach(b=>b.classList.toggle("active", b.dataset.tool===t));
+  // the 図形 (shape) button stands in for rect/ellipse
+  const shapeBtn = document.getElementById("tool-shape");
+  if (shapeBtn){
+    const isShape = (t==="rect" || t==="ellipse");
+    shapeBtn.classList.toggle("active", isShape);
+    if (isShape) document.getElementById("shape-ic").textContent = (t==="rect") ? "▭" : "◯";
+  }
+  render();
+}
+
+// ===== Draft (drawing) =====
+function commitDraft(){
+  if (!draft){ render(); return; }
+  if (draft.kind==="stitch"){
+    // stitch line = an OPEN dashed path
+    if (draft.nodes.length>=2){ pushUndo(); const p = newPart(draft.nodes.slice(), false); p.kind = "stitch"; p.color = STITCH_COLOR; }
+  } else {
+    if (draft.nodes.length>=2){ pushUndo(); }
+    if (draft.nodes.length>=3){ newPart(draft.nodes.slice(), true); }
+    else if (draft.nodes.length===2){ newPart(draft.nodes.slice(), false); }
+  }
+  draft = null;
+  render();
+}
+function cancelDraft(){ draft = null; render(); }
+
+// ===== Event handling =====
+svg.addEventListener("mousedown", (e)=>{
+  if (e.button===2) return; // right-click handled by contextmenu
+  svgRect = svg.getBoundingClientRect();   // toolbar height can change -> refresh once per gesture
+  const sp = svgPoint(e);
+  const wp = screenToWorld(sp.x, sp.y);
+  gestureSnap = snap(); // remember state so the whole gesture becomes one undo step
+
+  if (tool==="pan" || e.button===1){  // 移動ツール or 中ボタンで画面移動（Altは曲線ハンドルの左右独立用に確保）
+    panning = { x: sp.x, y: sp.y, tx: view.tx, ty: view.ty };
+    return;
+  }
+  // Notch tool: click near an outline to drop a match mark on the nearest part
+  if (tool==="notch"){
+    let best = { d: Infinity, part: null, pt: null };
+    for (const part of project.parts){
+      if (!part.closed || part.nodes.length < 3) continue;
+      const flat = flattenNodes(part.nodes, true);
+      const near = nearestOnOutline(flat, wp, true);
+      const dPx = near.d * view.scale;
+      if (dPx < best.d){ best = { d: dPx, part, pt: near.pt }; }
+    }
+    if (best.part && best.d < 20){
+      if (!best.part.notches) best.part.notches = [];
+      best.part.notches.push({ x: Math.round(best.pt.x), y: Math.round(best.pt.y) });
+      selectedPartId = best.part.id;
+      saveLocal(); render();
+    }
+    return;
+  }
+  // Text tool: click empty to create a text (opens editor); click a text to edit; drag to move
+  if (tool==="text"){
+    if (editingTextId!=null) commitTextEditor();
+    const hit = findTextAt(wp);
+    if (hit){ selTextId = hit.id; textDrag = { id:hit.id, startW:wp, ox:hit.x, oy:hit.y, moved:false, editOnClick:true }; }
+    else {
+      const t = { id:"t"+(idCounter++), x:Math.round(wp.x), y:Math.round(wp.y), text:"",
+                  size: parseFloat(document.getElementById("text-size").value)||20,
+                  color: document.getElementById("text-color").value || "#111827",
+                  vertical: document.getElementById("text-vertical").checked };
+      project.texts.push(t);
+      openTextEditor(t, true);
+    }
+    return;
+  }
+  // Rectangle / Ellipse / Arrow: drag from start to end
+  if (tool==="rect" || tool==="ellipse" || tool==="arrow" || tool==="dim"){
+    shapeDrag = { start: (tool==="dim") ? snapToVertex(wp) : maybeSnap(wp) };
+    render();
+    return;
+  }
+  // ===== 選択・編集ツール（すべてここに集約）=====
+  // 曲線ハンドル → 頂点 → 辺 → パーツ全体 → 範囲選択 の順に判定する
+  if (tool==="select"){
+    // 文字を最優先で拾う（クリックで選択、ドラッグで移動、ダブルクリックで編集）
+    const ht = findTextAt(wp);
+    if (ht){
+      selTextId = ht.id; selectedPartId = null; multiSel = []; selVertex = null;
+      const now = Date.now();
+      if (lastTClick.id===ht.id && (now - lastTClick.t) < 400){
+        lastTClick = { id:null, t:0 }; render(); openTextEditor(ht, false); return;
+      }
+      lastTClick = { id:ht.id, t:now };
+      textDrag = { id:ht.id, startW:wp, ox:ht.x, oy:ht.y, moved:false, editOnClick:false };
+      render(); return;
+    }
+    selTextId = null;
+    const startMove = (list)=>{ multiSel = list; selMove = { startW: wp, orig: list.map(m=>{ const nd=nodeOf(m); return { partId:m.partId, idx:m.idx, x:nd.x, y:nd.y }; }) }; };
+
+    // 1) ベジェハンドル：曲線の曲がり具合を調整
+    const h = findHandleAt(sp);
+    if (h && !e.shiftKey){
+      handleDrag = { partId: h.part.id, index: h.idx, which: h.which };
+      selectedPartId = h.part.id; return;
+    }
+    const v = findVertexAt(sp);
+    // 2) Shift+クリック：輪郭に点を追加してそのままドラッグ
+    if (e.shiftKey && !v){
+      const part = selectedPartId ? project.parts.find(p=>p.id===selectedPartId) : (findPartAt(wp)||findLinePartAt(wp));
+      if (part){
+        selectedPartId = part.id;
+        const idx = insertNodeAt(part, wp);
+        if (idx>=0){ selVertex={partId:part.id, idx}; selMode="points"; startMove([{partId:part.id, idx}]); render(); return; }
+      }
+    }
+    // 3) 頂点：その点だけを動かす（ダブルクリックで角↔曲線）
+    if (v){
+      selectedPartId = v.part.id;
+      selVertex = { partId: v.part.id, idx: v.idx };
+      const now = Date.now();
+      if (lastVClick.id===v.part.id && lastVClick.idx===v.idx && (now - lastVClick.t) < 400){
+        toggleNodeSmooth(v.part.nodes, v.idx, v.part.closed);
+        lastVClick = { id:null, idx:-1, t:0 }; saveLocal(); render(); return;
+      }
+      lastVClick = { id:v.part.id, idx:v.idx, t:now };
+      // 複数点を囲んで選んでいた場合だけ、その一団をまとめて動かす
+      const inPointSel = (selMode==="points") && multiSel.some(m=>m.partId===v.part.id && m.idx===v.idx) && multiSel.length>1;
+      selMode = "points";
+      startMove(inPointSel ? multiSel : [{ partId:v.part.id, idx:v.idx }]);
+      render(); return;
+    }
+    // 4) 辺の中央ハンドル：つかむとその辺ごと動いて長さ・形が変わる
+    if (selectedPartId){
+      const me = findMidEdgeAt(sp, selectedPartId);
+      if (me){
+        const n = me.part.nodes.length;
+        selVertex = null; selMode = "points";
+        startMove([{ partId:me.part.id, idx:me.i }, { partId:me.part.id, idx:(me.i+1)%n }]);
+        render(); return;
+      }
+    }
+    // 5) パーツ／線をクリック：まるごと選択（グループなら全部）
+    const part = findPartAt(wp) || findLinePartAt(wp);
+    if (part){
+      selectedPartId = part.id; selVertex = null; selMode = "part";
+      const groupParts = part.group ? project.parts.filter(p=>p.group===part.group) : [part];
+      const list = [];
+      for (const gp of groupParts) gp.nodes.forEach((_,i)=>list.push({ partId:gp.id, idx:i }));
+      startMove(list);
+      render(); return;
+    }
+    // 6) 空き：範囲選択
+    multiSel = []; selectedPartId = null; selVertex = null; selMode = "points";
+    marquee = { x0:sp.x, y0:sp.y, x1:sp.x, y1:sp.y };
+    render(); return;
+  }
+  // ステッチツール：辺をクリックすると、その辺だけに内側の点線を付け外し
+  if (tool==="stitch" && !draft){
+    const eg = findAnyEdgeAt(sp);
+    if (eg){
+      pushUndo();
+      const part = eg.part, mm = Math.max(1, parseFloat(document.getElementById("stitch-mm").value)||5);
+      if (!Array.isArray(part.stitchEdges)) part.stitchEdges = [];
+      const at = part.stitchEdges.indexOf(eg.i);
+      if (at >= 0) part.stitchEdges.splice(at,1); else part.stitchEdges.push(eg.i);
+      part.stitch = part.stitchEdges.length ? mm : 0;
+      if (!part.stitchEdges.length) part.stitchEdges = null;
+      selectedPartId = part.id;
+      saveLocal(); render();
+      return;
+    }
+  }
+  if (tool==="draw" || tool==="stitch"){
+    // pen/stitch: click near the first point closes (draw only; stitch stays open)
+    if (tool==="draw" && draft && draft.nodes.length>=2){
+      const s0 = worldToScreen(draft.nodes[0]);
+      if (Math.hypot(sp.x-s0.x, sp.y-s0.y) < 12){ commitDraft(); return; }
+    }
+    // place an anchor; drag before releasing pulls out symmetric bézier handles
+    const p = maybeSnap(wp);
+    if (!draft) draft = { nodes: [], kind: (tool==="stitch" ? "stitch" : "part") };
+    const node = { x:p.x, y:p.y, hIn:null, hOut:null };
+    draft.nodes.push(node);
+    penDrag = { index: draft.nodes.length-1, anchor: { x:p.x, y:p.y } };
+    render();
+  }
+});
+
+svg.addEventListener("mousemove", (e)=>{
+  const sp = svgPoint(e);
+  mouseWorld = screenToWorld(sp.x, sp.y);
+  if (panning){
+    view.tx = panning.tx + (sp.x - panning.x);
+    view.ty = panning.ty + (sp.y - panning.y);
+    renderThrottled();
+    return;
+  }
+  // Editing a bézier handle endpoint (mirror the opposite handle unless Alt held)
+  if (handleDrag){
+    const part = project.parts.find(p=>p.id===handleDrag.partId);
+    if (part){
+      const nd = part.nodes[handleDrag.index];
+      const off = { x: mouseWorld.x - nd.x, y: mouseWorld.y - nd.y };
+      if (handleDrag.which==="out"){ nd.hOut = off; if (nd.hIn && !e.altKey) nd.hIn = { x:-off.x, y:-off.y }; }
+      else { nd.hIn = off; if (nd.hOut && !e.altKey) nd.hOut = { x:-off.x, y:-off.y }; }
+      renderThrottled();
+    }
+    return;
+  }
+  // Pen tool: dragging after placing an anchor pulls out symmetric handles
+  if (penDrag && draft){
+    const nd = draft.nodes[penDrag.index];
+    const dx = mouseWorld.x - penDrag.anchor.x, dy = mouseWorld.y - penDrag.anchor.y;
+    if (Math.hypot(dx,dy)*view.scale > 3){ nd.hOut = { x:dx, y:dy }; nd.hIn = { x:-dx, y:-dy }; }
+    else { nd.hOut = null; nd.hIn = null; }
+    renderThrottled();
+    return;
+  }
+  // Moving a text label
+  if (textDrag){
+    const t = project.texts.find(x=>x.id===textDrag.id);
+    if (t){ t.x = textDrag.ox + (mouseWorld.x - textDrag.startW.x); t.y = textDrag.oy + (mouseWorld.y - textDrag.startW.y);
+      if (Math.hypot(mouseWorld.x-textDrag.startW.x, mouseWorld.y-textDrag.startW.y) > 2) textDrag.moved = true; renderThrottled(); }
+    return;
+  }
+  // Rectangle / ellipse preview while dragging
+  if (shapeDrag){ renderThrottled(); return; }
+  // Selection tool: dragging a marquee, or moving the selected points
+  if (marquee){
+    marquee.x1 = sp.x; marquee.y1 = sp.y;
+    multiSel = pointsInRect(marquee.x0, marquee.y0, marquee.x1, marquee.y1);
+    renderThrottled();
+    return;
+  }
+  if (selMove){
+    let dwx = mouseWorld.x - selMove.startW.x, dwy = mouseWorld.y - selMove.startW.y;
+    if (document.getElementById("chk-snap").checked){
+      const g = Math.max(1, parseFloat(document.getElementById("grid-size").value)||10);
+      dwx = Math.round(dwx/g)*g; dwy = Math.round(dwy/g)*g;
+    }
+    const adj = magnetAdjust(selMove.orig, dwx, dwy);   // snap to other parts' corners/edges
+    dwx = adj.dwx; dwy = adj.dwy;
+    for (const o of selMove.orig){ const nd = nodeOf(o); if (nd){ nd.x = o.x + dwx; nd.y = o.y + dwy; } }
+    renderThrottled();
+    return;
+  }
+  if (drag){
+    const part = project.parts.find(p=>p.id===drag.partId);
+    if (part){ const nd = part.nodes[drag.index]; const s = maybeSnap(mouseWorld); nd.x = s.x; nd.y = s.y; renderThrottled(); }
+    return;
+  }
+  if ((tool==="draw"||tool==="stitch") && draft){ renderThrottled(); }
+  else {
+    // highlight the edge under the cursor so it's obvious you can grab it
+    if (tool==="select" && selectedPartId && !selMove && !handleDrag){
+      const eg = findMidEdgeAt(sp, selectedPartId);
+      const key = eg ? eg.part.id+":"+eg.i : null;
+      const prev = hoverEdge ? hoverEdge.partId+":"+hoverEdge.i : null;
+      if (key !== prev){ hoverEdge = eg ? { partId:eg.part.id, i:eg.i } : null; renderThrottled(); return; }
+    } else if (hoverEdge){ hoverEdge = null; renderThrottled(); return; }
+    updateHint();
+  }
+});
+
+window.addEventListener("mouseup", ()=>{
+  // Only act when a canvas gesture was actually in progress. Without this, a plain
+  // click in the sidebar also ran render(), rebuilding the parts list and destroying
+  // the input the user just clicked (and cancelling a row drag).
+  if (!textDrag && !shapeDrag && !drag && !handleDrag && !selMove &&
+      !penDrag && !panning && !marquee && gestureSnap === null) return;
+  // finish a text drag: a click (no move) opens the editor; a drag commits the move
+  if (textDrag){
+    const t = project.texts.find(x=>x.id===textDrag.id);
+    if (t && !textDrag.moved && textDrag.editOnClick) openTextEditor(t, false);
+    else if (textDrag.moved) saveLocal();
+    textDrag = null; commitGesture(); render(); return;
+  }
+  // finish a rectangle/ellipse/arrow drag by creating the part
+  if (shapeDrag){
+    const a = shapeDrag.start, b = maybeSnap(mouseWorld);
+    if (tool==="dim"){
+      const e2 = snapToVertex(mouseWorld);
+      if (Math.hypot(a.x-e2.x, a.y-e2.y) > 3){
+        const p = newPart([{x:a.x,y:a.y,hIn:null,hOut:null},{x:e2.x,y:e2.y,hIn:null,hOut:null}], false);
+        p.kind = "dim"; p.color = "#111827";
+      }
+    } else if (tool==="arrow"){
+      if (Math.hypot(a.x-b.x, a.y-b.y) > 3){
+        const p = newPart([{x:a.x,y:a.y,hIn:null,hOut:null},{x:b.x,y:b.y,hIn:null,hOut:null}], false);
+        p.kind = "arrow"; p.color = "#111827";
+      }
+    } else if (Math.abs(a.x-b.x) > 2 && Math.abs(a.y-b.y) > 2){
+      const nodes = (tool==="rect") ? rectNodes(a,b) : ellipseNodes(a,b);
+      newPart(nodes, true);   // gestureSnap (set on mousedown) makes this one undo step
+    }
+    shapeDrag = null;
+  }
+  if (drag || handleDrag || selMove){ saveLocal(); }
+  drag = null; panning = null; penDrag = null; handleDrag = null; selMove = null; marquee = null; snapGuides = []; hoverEdge = null;
+  commitGesture();
+  render();
+});
+
+svg.addEventListener("dblclick", (e)=>{
+  if (tool==="draw" && draft && draft.nodes.length>=3){ e.preventDefault(); commitDraft(); }
+  else if (tool==="stitch" && draft && draft.nodes.length>=2){ e.preventDefault(); commitDraft(); }
+});
+
+// Right-click: delete a notch / vertex if pointing at one; otherwise show the menu
+svg.addEventListener("contextmenu", (e)=>{
+  e.preventDefault();
+  svgRect = svg.getBoundingClientRect();
+  const sp = svgPoint(e);
+  // Remove a notch if right-clicking near one (any tool)
+  for (const part of project.parts){
+    if (!part.notches) continue;
+    for (let i=0;i<part.notches.length;i++){
+      const s = worldToScreen(part.notches[i]);
+      if (Math.hypot(sp.x-s.x, sp.y-s.y) < 10){
+        part.notches.splice(i,1); saveLocal(); render(); return;
+      }
+    }
+  }
+  if (tool==="select"){
+    const v = findVertexAt(sp);
+    if (v){
+      const minNodes = v.part.closed ? 3 : 2;
+      if (v.part.nodes.length > minNodes){ selectedPartId = v.part.id; v.part.nodes.splice(v.idx,1); saveLocal(); render(); }
+      return;
+    }
+  }
+  // right-clicked ON an object -> that object's menu (colour / duplicate / delete)
+  const wp = screenToWorld(sp.x, sp.y);
+  const txt = findTextAt(wp);
+  const obj = findPartAt(wp) || findLinePartAt(wp);
+  if (txt || obj){ showObjectMenu(sp.x, sp.y, obj, txt); return; }
+  // otherwise: the file/view menu
+  showFileMenu(sp.x, sp.y);
+});
+let ctxTarget = null;   // { part } or { text } the object menu is acting on
+function placeMenu(m, x, y){
+  m.style.left = x + "px"; m.style.top = y + "px"; m.classList.add("show");
+}
+function showFileMenu(x, y){
+  ctxTarget = null;
+  const m = document.getElementById("context-menu");
+  m.innerHTML = `
+    <button data-cmd="fit">🔎 全体表示</button>
+    <button data-cmd="save">💾 保存</button>
+    <button data-cmd="load">📂 開く</button>
+    <button data-cmd="print">🖨 印刷</button>`;
+  placeMenu(m, x, y);
+}
+function showObjectMenu(x, y, part, text){
+  ctxTarget = text ? { text } : { part };
+  const cur = text ? (text.color||"#111827") : (part.color||"#2563eb");
+  const label = text ? `「${(text.text||"文字").slice(0,10)}」`
+                     : (part.kind==="stitch" ? "🧵 ステッチ線" : part.kind==="arrow" ? "↗ 矢印"
+                        : (part.name && part.name.trim() ? "▭ "+part.name : "▭ パーツ"));
+  const m = document.getElementById("context-menu");
+  m.innerHTML = `
+    <div class="cm-title">${escapeHtml(label)}</div>
+    <div class="cm-colors">${COLORS.map(c=>`<button class="chip${cur===c?' on':''}" data-color="${c}" title="この色にする" style="background:${c}"></button>`).join("")}</div>
+    <div class="cm-sep"></div>
+    ${(part && part.closed && !part.kind) ? (part.stitch>0
+        ? `<button data-cmd="stitchoff">🧵 内側のステッチを消す</button>`
+        : `<button data-cmd="stitchon">🧵 内側にステッチを入れる</button>`) : ""}
+    ${part ? `<button data-cmd="dupobj">複製</button>` : ""}
+    <button data-cmd="delobj">🗑 削除</button>`;
+  placeMenu(m, x, y);
+}
+function showContextMenu(x, y){ showFileMenu(x, y); }
+function hideContextMenu(){ document.getElementById("context-menu").classList.remove("show"); }
+document.getElementById("context-menu").addEventListener("click", (e)=>{
+  // colour chip inside the object menu
+  if (e.target.classList.contains("chip") && ctxTarget){
+    pushUndo();
+    const c = e.target.dataset.color;
+    if (ctxTarget.text) ctxTarget.text.color = c; else ctxTarget.part.color = c;
+    saveLocal(); render(); hideContextMenu(); return;
+  }
+  const cmd = e.target.dataset.cmd; if (!cmd) return;
+  hideContextMenu();
+  if (cmd==="fit") fitView();
+  else if (cmd==="save") document.getElementById("btn-save").click();
+  else if (cmd==="load") document.getElementById("btn-load").click();
+  else if (cmd==="print") window.print();
+  else if (cmd==="delobj" && ctxTarget){
+    pushUndo();
+    if (ctxTarget.text) project.texts = project.texts.filter(t=>t.id!==ctxTarget.text.id);
+    else project.parts = project.parts.filter(p=>p.id!==ctxTarget.part.id);
+    selectedPartId=null; multiSel=[]; saveLocal(); render();
+  }
+  else if (cmd==="stitchon" && ctxTarget && ctxTarget.part){
+    const mm = Math.max(1, parseFloat(document.getElementById("stitch-mm").value)||5);
+    stitchInside(ctxTarget.part, mm);
+  }
+  else if (cmd==="stitchoff" && ctxTarget && ctxTarget.part){
+    stitchInside(ctxTarget.part, 0);
+  }
+  else if (cmd==="dupobj" && ctxTarget && ctxTarget.part){
+    pushUndo();
+    const p = ctxTarget.part, xs = p.nodes.map(n=>n.x);
+    duplicatePart(p, Math.round(Math.max(...xs)-Math.min(...xs)+40), 0);
+    saveLocal(); render();
+  }
+});
+
+// zoom with wheel (centered on cursor)
+svg.addEventListener("wheel", (e)=>{
+  e.preventDefault();
+  const sp = svgPoint(e);
+  const before = screenToWorld(sp.x, sp.y);
+  const factor = e.deltaY < 0 ? 1.1 : 1/1.1;
+  view.scale = Math.min(40, Math.max(0.2, view.scale*factor));
+  const after = screenToWorld(sp.x, sp.y);
+  view.tx += (after.x - before.x)*view.scale;
+  view.ty += (after.y - before.y)*view.scale;
+  renderThrottled();
+}, { passive: false });
+
+window.addEventListener("keydown", (e)=>{
+  if (e.target.tagName === "INPUT") return;
+  if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="z"){ e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="y"){ e.preventDefault(); redo(); return; }
+  if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="c"){ e.preventDefault(); copySelection(); return; }
+  if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="v"){ e.preventDefault(); pasteClipboard(); return; }
+  if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="x"){ e.preventDefault();
+    if (copySelection()){ if (selTextId){ pushUndo(); project.texts=project.texts.filter(t=>t.id!==selTextId); selTextId=null; saveLocal(); render(); }
+                          else deleteSelection(); } return; }
+  // tool keyboard shortcuts (Affinity-style)
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length===1){
+    const map = { v:"select", p:"draw", t:"text", r:"rect", o:"ellipse", e:"select", n:"notch", h:"pan", s:"stitch", a:"arrow", d:"dim" };
+    const k = e.key.toLowerCase();
+    if (map[k]){ e.preventDefault(); setTool(map[k]); return; }
+  }
+  const drawing = (tool==="draw"||tool==="stitch") && draft;
+  if (e.key==="Escape" && !drawing){ selectedPartId=null; multiSel=[]; selVertex=null; marquee=null; selTextId=null; render(); }
+  if (drawing){
+    if (e.key==="Enter") commitDraft();
+    else if (e.key==="Escape") cancelDraft();
+    else if (e.key==="Backspace"){ e.preventDefault(); draft.nodes.pop(); if(!draft.nodes.length) draft=null; render(); }
+  }
+  if ((e.key==="Delete"||e.key==="Backspace") && tool==="select" && selTextId){
+    e.preventDefault(); pushUndo();
+    project.texts = project.texts.filter(t=>t.id!==selTextId);
+    selTextId = null; saveLocal(); render(); return;
+  }
+  if ((e.key==="Delete"||e.key==="Backspace") && tool==="select" && multiSel.length){
+    e.preventDefault(); deleteSelection(); return;
+  }
+  if ((e.key==="Delete"||e.key==="Backspace") && tool==="edit_disabled" && selectedPartId && e.target.tagName!=="INPUT"){
+    e.preventDefault(); deletePart(selectedPartId);
+  }
+});
+
+// ===== Sidebar interactions =====
+document.getElementById("part-list").addEventListener("click", (e)=>{
+  const item = e.target.closest(".part-item");
+  if (!item) return;
+  if (e.target.classList.contains("del")){ deletePart(item.dataset.part); return; }
+  if (e.target.classList.contains("grip")) return;              // grip is for dragging only
+  if (e.target.tagName === "INPUT"){
+    // clicked the name box: select the part but DON'T rebuild the list,
+    // otherwise the input we just clicked is destroyed and loses focus
+    selectedPartId = item.dataset.part; selVertex = null;
+    suppressListRender = true; render(); suppressListRender = false;
+    document.querySelectorAll(".part-item").forEach(d =>
+      d.classList.toggle("selected", d.dataset.part === selectedPartId));
+    return;
+  }
+  selectedPartId = item.dataset.part; selVertex = null; render();
+});
+
+// ----- drag the grip to reorder parts (also changes front/back stacking) -----
+(() => {
+  const list = document.getElementById("part-list");
+  let dragRowId = null;
+  const clearMarks = ()=> list.querySelectorAll(".part-item").forEach(d=>d.classList.remove("dragging","drop-before","drop-after"));
+  list.addEventListener("dragstart", (e)=>{
+    const item = e.target.closest(".part-item"); if (!item) return;
+    dragRowId = item.dataset.part;
+    e.dataTransfer.effectAllowed = "move";
+    try { e.dataTransfer.setData("text/plain", dragRowId); } catch(_){}
+    item.classList.add("dragging");
+  });
+  list.addEventListener("dragend", ()=>{ dragRowId = null; clearMarks(); });
+  list.addEventListener("dragover", (e)=>{
+    if (!dragRowId) return;
+    e.preventDefault();
+    const item = e.target.closest(".part-item");
+    if (!item || item.dataset.part === dragRowId) return;
+    const r = item.getBoundingClientRect();
+    const after = (e.clientY - r.top) > r.height/2;
+    list.querySelectorAll(".part-item").forEach(d=>d.classList.remove("drop-before","drop-after"));
+    item.classList.add(after ? "drop-after" : "drop-before");
+  });
+  list.addEventListener("drop", (e)=>{
+    e.preventDefault();
+    const item = e.target.closest(".part-item");
+    if (!item || !dragRowId || item.dataset.part === dragRowId){ clearMarks(); return; }
+    const r = item.getBoundingClientRect();
+    const after = (e.clientY - r.top) > r.height/2;
+    pushUndo();
+    const from = project.parts.findIndex(p=>p.id===dragRowId);
+    const moved = project.parts.splice(from,1)[0];
+    let to = project.parts.findIndex(p=>p.id===item.dataset.part);
+    if (after) to += 1;
+    project.parts.splice(to, 0, moved);
+    dragRowId = null; clearMarks();
+    saveLocal(); render();
+  });
+})();
+document.getElementById("part-list").addEventListener("focusin", (e)=>{
+  if (e.target.matches("input[data-field]")) pushUndo(); // one undo step per field edit
+});
+document.getElementById("part-list").addEventListener("input", (e)=>{
+  const item = e.target.closest(".part-item");
+  if (!item) return;
+  const part = project.parts.find(p=>p.id===item.dataset.part);
+  if (!part) return;
+  const f = e.target.dataset.field;
+  if (f==="qty"||f==="seam"||f==="stitch") part[f] = Math.max(0, parseFloat(e.target.value)||0);
+  else part[f] = e.target.value;
+  saveLocal();
+  renderParts();
+});
+
+// ===== Toolbar buttons =====
+const shapeFlyout = document.getElementById("shape-flyout");
+function hideShapeFlyout(){ shapeFlyout.classList.remove("show"); }
+document.querySelectorAll("button.tool").forEach(b=> b.addEventListener("click", (e)=>{
+  if (b.dataset.tool==="__shape"){ e.stopPropagation(); shapeFlyout.classList.toggle("show"); return; }
+  setTool(b.dataset.tool); hideShapeFlyout();
+}));
+// ≡ menu dropdown (file / view)
+const menuBtn = document.getElementById("menu-btn");
+const menuDrop = document.getElementById("menu-dropdown");
+menuBtn.addEventListener("click", (e)=>{ e.stopPropagation(); menuDrop.classList.toggle("show"); });
+menuDrop.addEventListener("click", ()=> menuDrop.classList.remove("show")); // an item was chosen
+// one document click closes all transient popups
+document.addEventListener("click", ()=>{ hideShapeFlyout(); menuDrop.classList.remove("show"); hideContextMenu(); });
+document.getElementById("chk-snap").addEventListener("change", render);
+document.getElementById("chk-dim").addEventListener("change", render);
+document.getElementById("grid-size").addEventListener("input", render);
+document.getElementById("btn-help").addEventListener("click", (e)=>{
+  e.stopPropagation();
+  const h = document.getElementById("hint");
+  h.classList.toggle("show");
+  document.getElementById("btn-help").classList.toggle("active", h.classList.contains("show"));
+  render();
+});
+document.getElementById("btn-sidebar").addEventListener("click", ()=>{
+  const sb = document.getElementById("sidebar");
+  sb.style.display = (sb.style.display==="none") ? "" : "none";
+  updateViewport(); render();
+});
+document.getElementById("btn-fit").addEventListener("click", fitView);
+document.getElementById("btn-undo").addEventListener("click", undo);
+document.getElementById("btn-redo").addEventListener("click", redo);
+
+// ----- 接円弧 (fillet) live slider -----
+// While a corner is selected in edit mode, the slider rounds it live from the
+// corner's original state (captured once), committing one undo step on release.
+let filletBase = null; // { nodes, partId, idx } — the corner's original state for this session
+function filletLive(r){
+  if (tool!=="select" || !selVertex){ if(!selVertex) filletHint(); return; }
+  const part = project.parts.find(p=>p.id===selVertex.partId);
+  if (!part) return;
+  if (!filletBase || filletBase.partId!==part.id || filletBase.idx!==selVertex.idx){
+    filletBase = { nodes: JSON.parse(JSON.stringify(part.nodes)), partId: part.id, idx: selVertex.idx };
+    pushUndo(); // one undo step for the whole slider session on this corner
+  }
+  part.nodes = JSON.parse(JSON.stringify(filletBase.nodes));
+  if (r > 0) filletNode(part, filletBase.idx, r);
+  saveLocal(); render();
+}
+function filletReset(){ filletBase = null; }
+let filletHinted = false;
+function filletHint(){ if(!filletHinted){ filletHinted=true; alert("「✥ 編集」モードで丸めたい角の点をクリックしてから、スライダーを動かしてください。"); } }
+const filletSlider = document.getElementById("fillet-slider");
+const filletNum = document.getElementById("fillet-r");
+filletSlider.addEventListener("input", ()=>{ filletNum.value = filletSlider.value; filletLive(+filletSlider.value); });
+filletNum.addEventListener("input", ()=>{ filletSlider.value = filletNum.value; filletLive(+filletNum.value); });
+
+// ----- 寸法で四角/円を作成 -----
+function createShapeByDims(kind){
+  const w = Math.max(1, parseFloat(document.getElementById("shape-w").value)||100);
+  const h = Math.max(1, parseFloat(document.getElementById("shape-h").value)||100);
+  const c = screenToWorld(vpW/2, vpH/2);
+  let cx = Math.round(c.x), cy = Math.round(c.y);
+  const a = { x: cx - w/2, y: cy - h/2 }, b = { x: cx + w/2, y: cy + h/2 };
+  pushUndo();
+  const nodes = (kind==="ellipse") ? ellipseNodes(a,b) : rectNodes(a,b);
+  newPart(nodes, true);
+  setTool("select"); selectedPartId = project.parts[project.parts.length-1].id;
+  multiSel = project.parts[project.parts.length-1].nodes.map((_,i)=>({partId:selectedPartId, idx:i}));
+  saveLocal(); render();
+}
+document.getElementById("btn-mk-rect").addEventListener("click", ()=>createShapeByDims("rect"));
+document.getElementById("btn-mk-ellipse").addEventListener("click", ()=>createShapeByDims("ellipse"));
+document.getElementById("btn-print").addEventListener("click", ()=>window.print());
+
+// ----- floating action bar (選択モード) -----
+document.getElementById("ab-rotl").addEventListener("click", ()=>{ const a=Math.abs(parseFloat(document.getElementById("ab-angle").value)||15); rotateSelection(-a); });
+document.getElementById("ab-rotr").addEventListener("click", ()=>{ const a=Math.abs(parseFloat(document.getElementById("ab-angle").value)||15); rotateSelection(a); });
+document.getElementById("ab-dup").addEventListener("click", duplicateSelection);
+document.getElementById("ab-fliph").addEventListener("click", ()=>flipSelection("h"));
+document.getElementById("ab-flipv").addEventListener("click", ()=>flipSelection("v"));
+document.getElementById("ab-group").addEventListener("click", groupSelection);
+document.getElementById("ab-ungroup").addEventListener("click", ungroupSelection);
+document.getElementById("ab-del").addEventListener("click", deleteSelection);
+
+// ----- 内側にステッチ（輪郭に平行な点線）-----
+function stitchInside(part, mm){
+  if (!part || !part.closed || part.kind) return false;
+  pushUndo();
+  part.stitch = Math.max(0, mm||0);
+  part.stitchEdges = null;          // whole outline
+  if (!part.stitch) part.stitchEdges = null;
+  saveLocal(); render();
+  return true;
+}
+document.getElementById("btn-stitch-inside").addEventListener("click", ()=>{
+  const mm = Math.max(1, parseFloat(document.getElementById("stitch-mm").value)||5);
+  // switching to the stitch tool clears multiSel, so fall back to the last selected part
+  let ids = [...new Set(multiSel.map(m=>m.partId))];
+  if (!ids.length && selectedPartId) ids = [selectedPartId];
+  const targets = ids.map(id=>project.parts.find(p=>p.id===id)).filter(p=>p && p.closed && !p.kind);
+  if (!targets.length){ alert("先に「⬚ 選択」でパーツをクリックして選んでから押してください。"); return; }
+  pushUndo();
+  for (const t of targets) t.stitch = mm;
+  saveLocal(); render();
+});
+
+// ----- inline text editor -----
+const textEditorEl = document.getElementById("text-editor");
+let imeComposing = false;   // 日本語変換中は Enter/Esc を横取りしない
+textEditorEl.addEventListener("compositionstart", ()=>{ imeComposing = true; });
+textEditorEl.addEventListener("compositionend",   ()=>{ imeComposing = false; });
+textEditorEl.addEventListener("keydown", (e)=>{
+  e.stopPropagation();
+  // IME変換中のEnter＝「ひらがな→漢字/英数」の確定。ここで入力を終わらせてはいけない
+  if (e.isComposing || imeComposing || e.keyCode === 229) return;
+  if (e.key==="Enter"){ e.preventDefault(); commitTextEditor(); }
+  else if (e.key==="Escape"){ e.preventDefault(); cancelTextEditor(); }
+});
+textEditorEl.addEventListener("blur", ()=>{ if (editingTextId!=null) commitTextEditor(); });
+// size / color / 縦書き apply live to the text being edited
+["text-size","text-color","text-vertical"].forEach(id=>{
+  document.getElementById(id).addEventListener("input", ()=>{
+    if (editingTextId==null) return;
+    const t = project.texts.find(x=>x.id===editingTextId); if (!t) return;
+    t.size = parseFloat(document.getElementById("text-size").value) || t.size;
+    t.color = document.getElementById("text-color").value;
+    t.vertical = document.getElementById("text-vertical").checked;
+    const ed = document.getElementById("text-editor");
+    ed.style.fontSize = Math.max(11, t.size*view.scale) + "px";
+    ed.style.color = t.color;
+    saveLocal(); render();
+  });
+});
+
+document.getElementById("btn-save").addEventListener("click", ()=>{
+  const data = JSON.stringify(project, null, 2);
+  const blob = new Blob([data], { type:"application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = (project.name||"縫製図面") + ".json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+document.getElementById("btn-load").addEventListener("click", ()=>document.getElementById("file-input").click());
+document.getElementById("file-input").addEventListener("change", (e)=>{
+  const file = e.target.files[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try {
+      const obj = JSON.parse(reader.result);
+      if (!obj.parts) throw new Error("形式が不正です");
+      project = obj;
+      normalizeAllParts();
+      // ensure ids unique counter
+      idCounter = Math.max(1, ...project.parts.map(p=>parseInt((p.id||"p0").slice(1))||0)) + 1;
+      selectedPartId = null; draft = null;
+      saveLocal(); fitView();
+    } catch(err){ alert("読み込みに失敗しました: " + err.message); }
+  };
+  reader.readAsText(file);
+  e.target.value = "";
+});
+
+// ===== Persistence (localStorage) =====
+function saveLocal(){ try { localStorage.setItem("sewing-project", JSON.stringify(project)); } catch(e){} }
+function loadLocal(){
+  try {
+    const s = localStorage.getItem("sewing-project");
+    if (s){ const obj = JSON.parse(s); if (obj && obj.parts){ project = obj; normalizeAllParts(); idCounter = Math.max(1, ...project.parts.map(p=>parseInt((p.id||"p0").slice(1))||0)) + 1; } }
+  } catch(e){}
+}
+
+// ===== Fit view =====
+function fitView(){
+  // include text extents too, otherwise labels/notes get cut off
+  const all = project.parts.flatMap(p=>p.nodes).map(n=>({x:n.x,y:n.y}));
+  for (const t of (project.texts||[])){
+    const len = Math.max(1,(t.text||"").length) * (t.size||20) * 0.95, h2 = (t.size||20);
+    if (t.vertical) all.push({x:t.x-h2/2, y:t.y}, {x:t.x+h2/2, y:t.y+len});
+    else            all.push({x:t.x, y:t.y-h2/2}, {x:t.x+len, y:t.y+h2/2});
+  }
+  const w = vpW, h = vpH;
+  if (all.length===0){ view = { scale: 2.5, tx: 60, ty: 60 }; render(); return; }
+  let minx=Infinity,miny=Infinity,maxx=-Infinity,maxy=-Infinity;
+  for (const n of all){ minx=Math.min(minx,n.x); miny=Math.min(miny,n.y); maxx=Math.max(maxx,n.x); maxy=Math.max(maxy,n.y); }
+  const pad = 60;
+  const sx = (w-2*pad)/Math.max(1,maxx-minx), sy=(h-2*pad)/Math.max(1,maxy-miny);
+  view.scale = Math.min(40, Math.max(0.2, Math.min(sx,sy)));
+  view.tx = pad - minx*view.scale;
+  view.ty = pad - miny*view.scale;
+  render();
+}
+
+// ===== Init =====
+function seedExample(){
+  if (project.parts.length) return;
+  // a demo seat panel 400x300 with a corner cut
+  newPart([{x:0,y:0},{x:400,y:0},{x:400,y:220},{x:300,y:300},{x:0,y:300}], true);
+  project.parts[0].name = "座面";
+  project.parts[0].fabric = "本革A";
+}
+
+window.addEventListener("resize", ()=>{ updateViewport(); render(); });
+window.addEventListener("scroll", updateViewport, true);   // keep the cached rect honest
+if (window.ResizeObserver) new ResizeObserver(()=>updateViewport()).observe(svg);
+updateViewport();
+loadLocal();
+seedExample();
+render();
+fitView();
+</script>
+</body>
+</html>
