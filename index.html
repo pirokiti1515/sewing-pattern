@@ -102,6 +102,7 @@
   #hint.show { display: block; }
   #readout { font-size: 11px; color: #9ca3af; white-space: nowrap; font-variant-numeric: tabular-nums; }
   #btn-help.active { background: #2563eb; border-color: #93c5fd; }
+  #toolbar button.toggle.on { background: #2563eb; border-color: #93c5fd; color: #fff; }
 
   /* ---- Sidebar ---- */
   #sidebar { width: 260px; background: #fafafa; border-left: 1px solid #e5e7eb; overflow-y: auto; padding: 12px; }
@@ -250,6 +251,14 @@
         <input type="range" id="fillet-slider" min="0" max="150" value="20" style="width:90px">
         <input type="number" id="fillet-r" value="20" min="0" step="1" style="width:44px">mm
       </label>
+      <button id="btn-mirror" class="toggle on" title="曲線の腕（ハンドル）を左右そろえて動かすか、片方ずつ動かすか。Altを押している間は一時的に逆になります">⇔ 腕を連動</button>
+    </span>
+    <span class="ctx" id="ctx-stroke">
+      <span class="sep"></span>
+      <label title="選んだパーツの線の太さ">線幅
+        <input type="range" id="stroke-slider" min="0.5" max="8" step="0.5" value="2" style="width:80px">
+        <input type="number" id="stroke-w" min="0.5" max="20" step="0.5" value="2" style="width:48px">
+      </label>
     </span>
     <!-- パーツ選択中だけ：操作バー（接円弧の右隣） -->
     <span class="ctx" id="action-bar">
@@ -300,6 +309,7 @@
     <div id="menu-wrap">
       <button id="menu-btn" title="ファイル・表示">≡ メニュー</button>
       <div id="menu-dropdown">
+        <button id="btn-new">📄 新規作成</button>
         <button id="btn-fit">🔎 全体表示</button>
         <button id="btn-save">💾 保存</button>
         <button id="btn-load">📂 開く</button>
@@ -450,7 +460,18 @@ let project = {
 };
 
 let view = { scale: 2.5, tx: 60, ty: 60 }; // px per mm, translation in px
+// 拡大縮小の範囲。表示%は scale*40 なので 0.005〜4000 で 0.2%〜160000%。
+// 工場の図面１枚まるごとから、1mm未満の細部まで、事実上ひっかからない広さ。
+const MIN_SCALE = 0.005, MAX_SCALE = 4000;
+const clampScale = (v)=> Math.min(MAX_SCALE, Math.max(MIN_SCALE, v));
+// 思い切り縮めても「0%」と出ないように、小さい時は小数で見せる
+function zoomText(){
+  const p = view.scale*40;
+  return (p < 1 ? p.toFixed(2) : p < 10 ? p.toFixed(1) : Math.round(p)) + "%";
+}
 let tool = "select";   // start in 選択 so stray clicks never create/deform anything
+let handleMirror = true;   // 曲線の腕を左右そろえて動かす（false=片側ずつ）。Altで一時反転
+let savedToFile = false;   // ファイルに保存/読込したか（新規作成の警告文に使う）
 let selectedPartId = null;
 let draft = null;           // {nodes:[{x,y}]}
 let drag = null;            // {partId, index} while dragging a vertex
@@ -466,7 +487,34 @@ let handleDrag = null;      // {partId, index, which:"in"|"out"} while editing a
 let selVertex = null;       // {partId, idx} currently selected anchor (for 接円弧/fillet)
 let multiSel = [];          // [{partId, idx}] points selected by the 選択 tool
 let marquee = null;         // {x0,y0,x1,y1} rubber-band rectangle (screen px)
-let selMove = null;         // {startW, orig:[{partId,idx,x,y}]} while moving the selection
+let selMove = null;         // {startW, orig:[{partId,idx,x,y}], origTexts, origNotches} while moving the selection
+// 選択を動かすときの控え。点が全部選ばれているパーツは合印も一緒に動かす
+// （置き去りにすると、見えている場所と保存位置がずれて合印を消せなくなる）
+function captureNotches(list){
+  const cnt = {};
+  for (const m of list) cnt[m.partId] = (cnt[m.partId]||0) + 1;
+  const out = [];
+  for (const pid in cnt){
+    const p = project.parts.find(pp=>pp.id===pid);
+    if (!p || !p.notches || !p.notches.length) continue;
+    if (cnt[pid] < p.nodes.length) continue;   // 一部だけ動かす時は輪郭に貼り付いたままにする
+    p.notches.forEach((q,i)=>out.push({ partId:pid, i, x:q.x, y:q.y }));
+  }
+  return out;
+}
+function makeSelMove(wp, list, textIds){
+  const ids = (textIds !== undefined) ? textIds : selTexts;
+  return { startW: wp,
+    orig: list.map(m=>{ const nd=nodeOf(m); return { partId:m.partId, idx:m.idx, x:nd.x, y:nd.y }; }),
+    origTexts: ids.map(id=>{ const t=project.texts.find(x=>x.id===id); return t?{id, x:t.x, y:t.y}:null; }).filter(Boolean),
+    origNotches: captureNotches(list) };
+}
+// 動かしたパーツの合印を輪郭の上に貼り直す（形だけ変えた時のずれ止め）
+function resnapMovedNotches(list){
+  for (const pid of new Set((list||[]).map(m=>m.partId))){
+    resnapNotches(project.parts.find(p=>p.id===pid));
+  }
+}
 let suppressListRender = false;  // keep the sidebar DOM alive while typing in it
 let selTexts = [];         // text ids picked with the 選択 tool
 let lastTClick = { id:null, t:0 };
@@ -874,7 +922,7 @@ function pushUndoSnapshot(s){
   redoStack.length = 0;
   updateUndoButtons();
 }
-function pushUndo(){ pushUndoSnapshot(snap()); }      // call BEFORE a mutation
+function pushUndo(){ savedToFile = false; pushUndoSnapshot(snap()); }   // call BEFORE a mutation
 function commitGesture(){                              // call on mouseup: record if the gesture changed anything
   if (gestureSnap !== null){
     if (snap() !== gestureSnap) pushUndoSnapshot(gestureSnap);
@@ -1047,7 +1095,17 @@ function migratePart(part){
     delete nd.smooth;
   });
 }
-function normalizeAllParts(){ if (!project.texts) project.texts=[]; for (const p of project.parts){ if (!p.notches) p.notches=[]; if (p.stitch==null) p.stitch=0; if (p.group===undefined) p.group=null; if (p.name==null) p.name=""; if (!p.color) p.color="#2563eb"; migratePart(p); }
+// 合印は「輪郭上の一番近い場所」に描かれる。保存している座標が輪郭から離れていると、
+// 見えている場所と実際の位置がずれ、右クリックしても消せなくなる。輪郭の上に貼り直す。
+function resnapNotches(part){
+  if (!part || !part.notches || !part.notches.length || part.nodes.length < 2) return;
+  const flat = flattenNodes(part.nodes, part.closed);
+  for (const nt of part.notches){
+    const near = nearestOnOutline(flat, nt, part.closed);
+    if (near && near.pt){ nt.x = near.pt.x; nt.y = near.pt.y; }
+  }
+}
+function normalizeAllParts(){ if (!project.texts) project.texts=[]; for (const p of project.parts){ if (!p.notches) p.notches=[]; if (p.stitch==null) p.stitch=0; if (p.group===undefined) p.group=null; if (p.name==null) p.name=""; if (!p.color) p.color="#2563eb"; migratePart(p); resnapNotches(p); }
   for (const t of project.texts){ if (t.group===undefined) t.group=null; if (!t.font) t.font="gothic"; if (t.bold===undefined) t.bold=false; } }
 function bezierAt(seg, u){
   const mu = 1-u;
@@ -1246,6 +1304,32 @@ function updateContextBar(){
     }
   }
   document.getElementById("ctx-stitch").classList.toggle("show", tool==="stitch");
+  // 腕の連動スイッチの見た目
+  const mb = document.getElementById("btn-mirror");
+  mb.classList.toggle("on", handleMirror);
+  mb.textContent = handleMirror ? "⇔ 腕を連動" : "⇔ 腕を片側ずつ";
+  // 線幅：パーツを選んでいる時だけ出す
+  const lwParts = selectedStrokeParts();
+  document.getElementById("ctx-stroke").classList.toggle("show", tool==="select" && lwParts.length>0);
+  if (lwParts.length && document.activeElement !== document.getElementById("stroke-w")
+                     && document.activeElement !== document.getElementById("stroke-slider")){
+    const v = lwParts[0].lw > 0 ? lwParts[0].lw : 2;
+    document.getElementById("stroke-w").value = v;
+    document.getElementById("stroke-slider").value = Math.min(8, Math.max(0.5, v));
+  }
+}
+// 線幅を変えられるパーツ（矢印・寸法線・ステッチは対象外）
+function selectedStrokeParts(){
+  const ids = new Set(multiSel.map(m=>m.partId));
+  if (selectedPartId) ids.add(selectedPartId);
+  return [...ids].map(id=>project.parts.find(p=>p.id===id)).filter(p=>p && !p.kind);
+}
+function applyStrokeWidth(v){
+  const parts = selectedStrokeParts();
+  if (!parts.length) return;
+  const w = Math.min(20, Math.max(0.5, parseFloat(v)||2));
+  for (const p of parts) p.lw = w;
+  saveLocal(); render();
 }
 function updateActionBar(){
   const bar = document.getElementById("action-bar");
@@ -1311,7 +1395,7 @@ function render(){
   updateContextBar();
   updateActionBar();
   document.getElementById("readout").textContent =
-    `X:${Math.round(mouseWorld.x)} Y:${Math.round(mouseWorld.y)}mm ・ ${Math.round(view.scale*40)}%`;
+    `X:${Math.round(mouseWorld.x)} Y:${Math.round(mouseWorld.y)}mm ・ ${zoomText()}`;
 }
 
 // Overlay for the 選択 tool: every anchor as a small square (selected ones highlighted) + marquee box.
@@ -1481,6 +1565,8 @@ function renderParts(){
       fill: part.color, stroke: part.color,
       "data-part": part.id
     });
+    // 線幅の指定があれば使う。CSSの指定に勝たせるため style で当てる
+    if (part.lw > 0) path.style.strokeWidth = (selected ? part.lw + 1 : part.lw);
     frag.appendChild(path);
     // edge length labels (arc length for curved segments)
     if (showDim){
@@ -1880,9 +1966,7 @@ svg.addEventListener("mousedown", (e)=>{
       const spanning = multiSel.length>0 || selTexts.length>1;
       if (inSel && spanning){
         selectedPartId = selectedPartId || null; selVertex = null;
-        selMove = { startW: wp,
-          orig: multiSel.map(m=>{ const nd=nodeOf(m); return { partId:m.partId, idx:m.idx, x:nd.x, y:nd.y }; }),
-          origTexts: selTexts.map(id=>{ const t=project.texts.find(x=>x.id===id); return t?{id,x:t.x,y:t.y}:null; }).filter(Boolean) };
+        selMove = makeSelMove(wp, multiSel);
         render(); return;
       }
       // グループに属する文字なら、そのグループごと選ぶ
@@ -1891,21 +1975,19 @@ svg.addEventListener("mousedown", (e)=>{
         const gt = project.texts.filter(t=>t.group===ht.group).map(t=>t.id);
         multiSel = []; gp.forEach(p=>p.nodes.forEach((_,i)=>multiSel.push({partId:p.id, idx:i})));
         selTexts = gt; selectedPartId = gp.length?gp[0].id:null; selVertex = null; selMode = "part";
-        selMove = { startW: wp,
-          orig: multiSel.map(m=>{ const nd=nodeOf(m); return { partId:m.partId, idx:m.idx, x:nd.x, y:nd.y }; }),
-          origTexts: selTexts.map(id=>{ const t=project.texts.find(x=>x.id===id); return t?{id,x:t.x,y:t.y}:null; }).filter(Boolean) };
+        selMove = makeSelMove(wp, multiSel);
         render(); return;
       }
       selTexts = [ht.id]; selectedPartId = null; multiSel = []; selVertex = null;
       textDrag = { id:ht.id, startW:wp, ox:ht.x, oy:ht.y, moved:false, editOnClick:false };
       render(); return;
     }
+    // textIds を省くと「今選んでいる文字」がそのまま付いてくる。
+    // 点や辺をつかむ操作では [] を渡して文字を切り離すこと（一緒に動いてしまうため）。
     const startMove = (list, textIds)=>{
       multiSel = list;
       if (textIds !== undefined) selTexts = textIds;
-      selMove = { startW: wp,
-        orig: list.map(m=>{ const nd=nodeOf(m); return { partId:m.partId, idx:m.idx, x:nd.x, y:nd.y }; }),
-        origTexts: selTexts.map(id=>{ const t=project.texts.find(x=>x.id===id); return t?{id, x:t.x, y:t.y}:null; }).filter(Boolean) };
+      selMove = makeSelMove(wp, list, textIds);
     };
 
     // 0) 拡大縮小ハンドル（選択範囲の枠）を最優先
@@ -1915,7 +1997,9 @@ svg.addEventListener("mousedown", (e)=>{
     const h = findHandleAt(sp);
     if (h && !e.shiftKey){
       handleDrag = { partId: h.part.id, index: h.idx, which: h.which };
-      selectedPartId = h.part.id; return;
+      selectedPartId = h.part.id;
+      selTexts = [];              // 曲線をいじる操作なので文字の選択は外す
+      render(); return;
     }
     const v = findVertexAt(sp);
     // 2) Shift+クリック：輪郭に点を追加してそのままドラッグ
@@ -1924,7 +2008,7 @@ svg.addEventListener("mousedown", (e)=>{
       if (part){
         selectedPartId = part.id;
         const idx = insertNodeAt(part, wp);
-        if (idx>=0){ selVertex={partId:part.id, idx}; selMode="points"; startMove([{partId:part.id, idx}]); render(); return; }
+        if (idx>=0){ selVertex={partId:part.id, idx}; selMode="points"; startMove([{partId:part.id, idx}], []); render(); return; }
       }
     }
     // 3) 頂点：その点だけを動かす（ダブルクリックで角↔曲線）
@@ -1940,7 +2024,9 @@ svg.addEventListener("mousedown", (e)=>{
       // 複数点を囲んで選んでいた場合だけ、その一団をまとめて動かす
       const inPointSel = (selMode==="points") && multiSel.some(m=>m.partId===v.part.id && m.idx===v.idx) && multiSel.length>1;
       selMode = "points";
-      startMove(inPointSel ? multiSel : [{ partId:v.part.id, idx:v.idx }]);
+      // 点を1つつかんだ時は文字を連れて行かない。囲んで選んだ一団を動かす時だけ文字も一緒。
+      if (inPointSel) startMove(multiSel);
+      else            startMove([{ partId:v.part.id, idx:v.idx }], []);
       render(); return;
     }
     // 4) 辺の中央ハンドル：つかむとその辺ごと動いて長さ・形が変わる
@@ -1949,7 +2035,7 @@ svg.addEventListener("mousedown", (e)=>{
       if (me){
         const n = me.part.nodes.length;
         selVertex = null; selMode = "points";
-        startMove([{ partId:me.part.id, idx:me.i }, { partId:me.part.id, idx:(me.i+1)%n }]);
+        startMove([{ partId:me.part.id, idx:me.i }, { partId:me.part.id, idx:(me.i+1)%n }], []);
         render(); return;
       }
     }
@@ -2045,8 +2131,10 @@ svg.addEventListener("mousemove", (e)=>{
     if (part){
       const nd = part.nodes[handleDrag.index];
       const off = { x: mouseWorld.x - nd.x, y: mouseWorld.y - nd.y };
-      if (handleDrag.which==="out"){ nd.hOut = off; if (nd.hIn && !e.altKey) nd.hIn = { x:-off.x, y:-off.y }; }
-      else { nd.hIn = off; if (nd.hOut && !e.altKey) nd.hOut = { x:-off.x, y:-off.y }; }
+      // 連動スイッチが基本。Altを押している間だけ一時的に逆（＝片側だけ）になる
+      const mirror = handleMirror ? !e.altKey : e.altKey;
+      if (handleDrag.which==="out"){ nd.hOut = off; if (nd.hIn && mirror) nd.hIn = { x:-off.x, y:-off.y }; }
+      else { nd.hIn = off; if (nd.hOut && mirror) nd.hOut = { x:-off.x, y:-off.y }; }
       renderThrottled();
     }
     return;
@@ -2088,6 +2176,11 @@ svg.addEventListener("mousemove", (e)=>{
     dwx = adj.dwx; dwy = adj.dwy;
     for (const o of selMove.orig){ const nd = nodeOf(o); if (nd){ nd.x = o.x + dwx; nd.y = o.y + dwy; } }
     for (const o of (selMove.origTexts||[])){ const t = project.texts.find(x=>x.id===o.id); if (t){ t.x = o.x + dwx; t.y = o.y + dwy; } }
+    // 合印も一緒に動かす（置き去りにすると見えている場所と保存位置がずれる）
+    for (const o of (selMove.origNotches||[])){
+      const p = project.parts.find(pp=>pp.id===o.partId);
+      if (p && p.notches && p.notches[o.i]){ p.notches[o.i].x = o.x + dwx; p.notches[o.i].y = o.y + dwy; }
+    }
     renderThrottled();
     return;
   }
@@ -2150,7 +2243,14 @@ window.addEventListener("mouseup", (e)=>{
     }
     shapeDrag = null;
   }
-  if (drag || handleDrag || selMove || scaleDrag){ saveLocal(); }
+  // 形を変えた後は合印を輪郭の上に貼り直す（ずれたままだと消せなくなる）
+  if (drag || handleDrag || selMove || scaleDrag){
+    if (selMove) resnapMovedNotches(selMove.orig);
+    if (scaleDrag) resnapMovedNotches(scaleDrag.nodes);
+    if (drag && drag.partId) resnapNotches(project.parts.find(p=>p.id===drag.partId));
+    if (handleDrag && handleDrag.partId) resnapNotches(project.parts.find(p=>p.id===handleDrag.partId));
+    saveLocal();
+  }
   scaleDrag = null;
   drag = null; panning = null; penDrag = null; handleDrag = null; selMove = null; marquee = null; snapGuides = []; hoverEdge = null;
   commitGesture();
@@ -2174,11 +2274,22 @@ svg.addEventListener("contextmenu", (e)=>{ e.preventDefault(); });
 
 function openContextMenu(sp){
   // Remove a notch if right-clicking near one (any tool)
+  // 保存位置だけでなく「実際に描かれている位置」でも当たり判定する。
+  // 過去にずれてしまった合印も、見えている所を右クリックすれば消せるように。
   for (const part of project.parts){
-    if (!part.notches) continue;
+    if (!part.notches || !part.notches.length) continue;
+    const flat = part.nodes.length>=2 ? flattenNodes(part.nodes, part.closed) : null;
     for (let i=0;i<part.notches.length;i++){
       const s = worldToScreen(part.notches[i]);
-      if (Math.hypot(sp.x-s.x, sp.y-s.y) < 10){
+      let hit = Math.hypot(sp.x-s.x, sp.y-s.y) < 10;
+      if (!hit && flat){
+        const near = nearestOnOutline(flat, part.notches[i], part.closed);
+        if (near && near.pt){
+          const d = worldToScreen(near.pt);
+          hit = Math.hypot(sp.x-d.x, sp.y-d.y) < 10;
+        }
+      }
+      if (hit){
         part.notches.splice(i,1); saveLocal(); render(); return;
       }
     }
@@ -2207,6 +2318,8 @@ function showFileMenu(x, y){
   ctxTarget = null;
   const m = document.getElementById("context-menu");
   m.innerHTML = `
+    <button data-cmd="new">📄 新規作成</button>
+    <div class="cm-sep"></div>
     <button data-cmd="fit">🔎 全体表示</button>
     <button data-cmd="save">💾 保存</button>
     <button data-cmd="load">📂 開く</button>
@@ -2243,7 +2356,8 @@ document.getElementById("context-menu").addEventListener("click", (e)=>{
   }
   const cmd = e.target.dataset.cmd; if (!cmd) return;
   hideContextMenu();
-  if (cmd==="fit") fitView();
+  if (cmd==="new") newProject();
+  else if (cmd==="fit") fitView();
   else if (cmd==="save") document.getElementById("btn-save").click();
   else if (cmd==="load") document.getElementById("btn-load").click();
   else if (cmd==="print") openPrintDialog();
@@ -2274,7 +2388,7 @@ svg.addEventListener("wheel", (e)=>{
   const sp = svgPoint(e);
   const before = screenToWorld(sp.x, sp.y);
   const factor = e.deltaY < 0 ? 1.1 : 1/1.1;
-  view.scale = Math.min(40, Math.max(0.2, view.scale*factor));
+  view.scale = clampScale(view.scale*factor);
   const after = screenToWorld(sp.x, sp.y);
   view.tx += (after.x - before.x)*view.scale;
   view.ty += (after.y - before.y)*view.scale;
@@ -2445,6 +2559,20 @@ const filletSlider = document.getElementById("fillet-slider");
 const filletNum = document.getElementById("fillet-r");
 filletSlider.addEventListener("input", ()=>{ filletNum.value = filletSlider.value; filletLive(+filletSlider.value); });
 filletNum.addEventListener("input", ()=>{ filletSlider.value = filletNum.value; filletLive(+filletNum.value); });
+
+// ----- 曲線の腕：連動 / 片側ずつ -----
+document.getElementById("btn-mirror").addEventListener("click", ()=>{
+  handleMirror = !handleMirror; render();
+});
+
+// ----- 選んだパーツの線幅 -----
+const strokeSlider = document.getElementById("stroke-slider");
+const strokeNum = document.getElementById("stroke-w");
+// ドラッグ中はひと続きの操作として1回だけ取り消せるようにする
+strokeSlider.addEventListener("mousedown", ()=>{ if (selectedStrokeParts().length) pushUndo(); });
+strokeNum.addEventListener("focus", ()=>{ if (selectedStrokeParts().length) pushUndo(); });
+strokeSlider.addEventListener("input", ()=>{ strokeNum.value = strokeSlider.value; applyStrokeWidth(strokeSlider.value); });
+strokeNum.addEventListener("input", ()=>{ strokeSlider.value = Math.min(8, Math.max(0.5, +strokeNum.value||2)); applyStrokeWidth(strokeNum.value); });
 
 // ----- 寸法で四角/円を作成 -----
 function createShapeByDims(kind){
@@ -2695,7 +2823,35 @@ function applyTextProps(){
   el.addEventListener("change", applyTextProps);
 });
 
+// ===== 新規作成 =====
+// 自動保存はブラウザの中だけ。ファイルに保存していない図面は消えるので必ず確認する。
+function newProject(){
+  const np = project.parts.length, nt = (project.texts||[]).length;
+  if (np || nt){
+    const warn = savedToFile
+      ? "※ファイルに保存した後、変更した分は失われます。\n"
+      : "※この図面はまだ一度もファイルに保存していません。\n";
+    const msg = "新しい図面を作ります。\n\n"
+      + `今の図面（パーツ ${np}個・文字 ${nt}個）は消えます。\n`
+      + warn
+      + "\n残したいときは「キャンセル」を押して、\n"
+      + "≡メニューの「💾 保存」でファイルに保存してください。\n\n"
+      + "消して新規作成しますか？";
+    if (!window.confirm(msg)) return;
+  }
+  pushUndo();                       // 押し間違えても ⌘Z で戻せるように
+  project = { name: "無題", unit: "mm", parts: [], texts: [] };
+  idCounter = 1;
+  selectedPartId = null; multiSel = []; selTexts = []; selVertex = null; draft = null;
+  scaleDrag = null; selMove = null; marquee = null;
+  view = { scale: 2.5, tx: 60, ty: 60 };
+  savedToFile = false;
+  setTool("select"); saveLocal(); render();
+}
+document.getElementById("btn-new").addEventListener("click", newProject);
+
 document.getElementById("btn-save").addEventListener("click", ()=>{
+  savedToFile = true;
   const data = JSON.stringify(project, null, 2);
   const blob = new Blob([data], { type:"application/json" });
   const a = document.createElement("a");
@@ -2716,7 +2872,8 @@ document.getElementById("file-input").addEventListener("change", (e)=>{
       normalizeAllParts();
       // ensure ids unique counter
       idCounter = Math.max(1, ...project.parts.map(p=>parseInt((p.id||"p0").slice(1))||0)) + 1;
-      selectedPartId = null; draft = null;
+      selectedPartId = null; draft = null; multiSel = []; selTexts = [];
+      savedToFile = true;
       saveLocal(); fitView();
     } catch(err){ alert("読み込みに失敗しました: " + err.message); }
   };
@@ -2753,11 +2910,14 @@ function contentBounds(){
 function fitView(){
   const b = contentBounds();
   const w = vpW, h = vpH;
+  // 画面がまだ描かれていない（幅0）時に計算すると、とんでもない倍率になって
+  // 図面が消えたように見えるので、その時は今の表示のままにしておく
+  if (!(w > 0) || !(h > 0)) return;
   if (!b){ view = { scale: 2.5, tx: 60, ty: 60 }; render(); return; }
   const minx=b.minx, miny=b.miny, maxx=b.maxx, maxy=b.maxy;
   const pad = 60;
   const sx = (w-2*pad)/Math.max(1,maxx-minx), sy=(h-2*pad)/Math.max(1,maxy-miny);
-  view.scale = Math.min(40, Math.max(0.2, Math.min(sx,sy)));
+  view.scale = clampScale(Math.min(sx,sy));
   view.tx = pad - minx*view.scale;
   view.ty = pad - miny*view.scale;
   render();
