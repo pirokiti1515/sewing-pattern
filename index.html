@@ -103,6 +103,12 @@
   #readout { font-size: 11px; color: #9ca3af; white-space: nowrap; font-variant-numeric: tabular-nums; }
   #btn-help.active { background: #2563eb; border-color: #93c5fd; }
   #toolbar button.toggle.on { background: #2563eb; border-color: #93c5fd; color: #fff; }
+  /* これから描くパーツの色えらび（白も見えるよう枠を付ける） */
+  #new-colors { display: inline-flex; gap: 4px; align-items: center; }
+  #new-colors .chip { width: 17px; height: 17px; border-radius: 50%; padding: 0; cursor: pointer;
+    border: 1px solid rgba(255,255,255,.45); flex: none; }
+  #new-colors .chip:hover { transform: scale(1.2); }
+  #new-colors .chip.on { outline: 2px solid #fff; outline-offset: 1px; }
 
   /* ---- Sidebar ---- */
   #sidebar { width: 260px; background: #fafafa; border-left: 1px solid #e5e7eb; overflow-y: auto; padding: 12px; }
@@ -282,6 +288,10 @@
       <button id="btn-mk-rect" title="この寸法で四角を作成">▭作成</button>
       <button id="btn-mk-ellipse" title="この寸法で円を作成">◯作成</button>
     </span>
+    <span class="ctx" id="ctx-newcolor">
+      <span class="sep"></span>
+      <span id="new-colors" title="これから描くパーツの色"></span>
+    </span>
     <!-- ステッチツールの時だけ：内側オフセット -->
     <span class="ctx" id="ctx-stitch">
       <span class="sep"></span>
@@ -450,7 +460,7 @@ const FONTS = {
 };
 const fontOf = (t)=> FONTS[t && t.font] || FONTS.gothic;
 const STITCH_COLOR = "#dc2626";   // ステッチ線は赤
-const COLORS = ["#2563eb","#0891b2","#16a34a","#65a30d","#d97706","#dc2626","#db2777","#7c3aed","#4b5563","#111827"];
+const COLORS = ["#111827","#2563eb","#0891b2","#16a34a","#65a30d","#d97706","#dc2626","#db2777","#7c3aed","#4b5563","#ffffff"];
 
 let project = {
   name: "無題の図面",
@@ -1105,7 +1115,7 @@ function resnapNotches(part){
     if (near && near.pt){ nt.x = near.pt.x; nt.y = near.pt.y; }
   }
 }
-function normalizeAllParts(){ if (!project.texts) project.texts=[]; for (const p of project.parts){ if (!p.notches) p.notches=[]; if (p.stitch==null) p.stitch=0; if (p.group===undefined) p.group=null; if (p.name==null) p.name=""; if (!p.color) p.color="#2563eb"; migratePart(p); resnapNotches(p); }
+function normalizeAllParts(){ if (!project.texts) project.texts=[]; for (const p of project.parts){ if (!p.notches) p.notches=[]; if (p.stitch==null) p.stitch=0; if (p.group===undefined) p.group=null; if (p.name==null) p.name=""; if (!p.color) p.color=DEFAULT_COLOR; migratePart(p); resnapNotches(p); }
   for (const t of project.texts){ if (t.group===undefined) t.group=null; if (!t.font) t.font="gothic"; if (t.bold===undefined) t.bold=false; } }
 function bezierAt(seg, u){
   const mu = 1-u;
@@ -1291,6 +1301,8 @@ function updateContextBar(){
   document.getElementById("ctx-common").classList.add("show");
   document.getElementById("ctx-edit").classList.toggle("show", tool==="select");
   document.getElementById("ctx-shape").classList.toggle("show", tool==="rect" || tool==="ellipse");
+  // これから描くパーツの色：図形とペンで使うので、その2つの時に出す
+  document.getElementById("ctx-newcolor").classList.toggle("show", tool==="rect" || tool==="ellipse" || tool==="draw");
   const textCtxOn = (tool==="text") || (tool==="select" && selTexts.length>0);
   document.getElementById("ctx-text").classList.toggle("show", textCtxOn);
   if (tool==="select" && selTexts.length){          // 選択中の文字の設定を表示に反映
@@ -1505,7 +1517,7 @@ function renderParts(){
     if (part.nodes.length < 2) continue;
     // stitch line: an open dashed path (no fill, no seam/label)
     if (part.kind==="stitch"){
-      frag.appendChild(mk("path", { d: nodesScreenPath(part.nodes, false), class:"stitchline", stroke: part.color, "data-part": part.id }));
+      frag.appendChild(mk("path", { d: nodesScreenPath(part.nodes, false), class:"stitchline", stroke: lineColorOf(part), "data-part": part.id }));
       continue;
     }
     // dimension: arrows at both ends + the measured length, recomputed live
@@ -1530,7 +1542,7 @@ function renderParts(){
     }
     // arrow: an open path with an arrowhead (grain direction / leader line)
     if (part.kind==="arrow"){
-      frag.appendChild(mk("path", { d: nodesScreenPath(part.nodes, false), class:"arrowline", stroke: part.color,
+      frag.appendChild(mk("path", { d: nodesScreenPath(part.nodes, false), class:"arrowline", stroke: lineColorOf(part),
         "marker-end": "url(#arrowhead)", "data-part": part.id }));
       continue;
     }
@@ -1540,7 +1552,7 @@ function renderParts(){
     if (part.closed && part.seam > 0 && part.nodes.length >= 3){
       const off = outwardOffset(flat, part.seam);
       if (off){
-        frag.appendChild(mk("path", { d: screenPath(off, true), class: "seam-line", stroke: part.color }));
+        frag.appendChild(mk("path", { d: screenPath(off, true), class: "seam-line", stroke: lineColorOf(part) }));
       }
     }
     // topstitch line — inner parallel dotted line (whole outline, or just chosen edges)
@@ -1562,9 +1574,11 @@ function renderParts(){
     const path = mk("path", {
       d: partScreenPath(part),
       class: "part-outline" + (selected?" selected":""),
-      fill: part.color, stroke: part.color,
+      fill: part.color, stroke: lineColorOf(part),
       "data-part": part.id
     });
+    // 白のときは塗りを不透明な白にして、縁取りの黒で形が分かるようにする
+    if (isWhite(part.color)) path.style.fillOpacity = 1;
     // 線幅の指定があれば使う。CSSの指定に勝たせるため style で当てる
     if (part.lw > 0) path.style.strokeWidth = (selected ? part.lw + 1 : part.lw);
     frag.appendChild(path);
@@ -1590,7 +1604,7 @@ function renderParts(){
         const px = -near.ty, py = near.tx; // perpendicular unit vector
         const a = worldToScreen({ x: near.pt.x - px*half, y: near.pt.y - py*half });
         const b = worldToScreen({ x: near.pt.x + px*half, y: near.pt.y + py*half });
-        frag.appendChild(mk("line", { x1:a.x, y1:a.y, x2:b.x, y2:b.y, class:"notch", stroke: part.color, "data-notch":"1" }));
+        frag.appendChild(mk("line", { x1:a.x, y1:a.y, x2:b.x, y2:b.y, class:"notch", stroke: lineColorOf(part), "data-notch":"1" }));
       }
     }
     // name label at centroid — only when the user has actually named the part
@@ -1717,9 +1731,13 @@ function mk(tag, attrs){
 function escapeHtml(s){ return String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 
 // ===== Parts management =====
-const DEFAULT_COLOR = "#2563eb"; // all parts start blue; changeable per part
+const DEFAULT_COLOR = "#111827"; // パーツは黒で始まる。色は後から変えられる
+let newPartColor = DEFAULT_COLOR;  // これから描くパーツの色（図形ツールの色えらびで変える）
+// 白いパーツは白い画布に溶けてしまうので、線だけ黒で描く（塗りは白のまま）
+const isWhite = (c)=> { const s=(c||"").toLowerCase(); return s==="#ffffff" || s==="#fff" || s==="white"; };
+const lineColorOf = (part)=> isWhite(part && part.color) ? "#111827" : (part ? part.color : DEFAULT_COLOR);
 function newPart(nodes, closed){
-  const part = { id: "p"+(idCounter++), name: "", qty: 1, fabric: "", color: DEFAULT_COLOR, seam: 0, stitch: 0, closed: !!closed, group: null, nodes, notches: [] };
+  const part = { id: "p"+(idCounter++), name: "", qty: 1, fabric: "", color: newPartColor, seam: 0, stitch: 0, closed: !!closed, group: null, nodes, notches: [] };
   migratePart(part);
   project.parts.push(part);
   selectedPartId = part.id;
@@ -2559,6 +2577,22 @@ const filletSlider = document.getElementById("fillet-slider");
 const filletNum = document.getElementById("fillet-r");
 filletSlider.addEventListener("input", ()=>{ filletNum.value = filletSlider.value; filletLive(+filletSlider.value); });
 filletNum.addEventListener("input", ()=>{ filletSlider.value = filletNum.value; filletLive(+filletNum.value); });
+
+// ----- これから描くパーツの色えらび（図形ツールの欄） -----
+function renderNewColors(){
+  const box = document.getElementById("new-colors");
+  const cur = newPartColor;
+  box.innerHTML = COLORS.map(c=>
+    `<button class="chip${cur===c?" on":""}" data-newcolor="${c}" title="${c==="#ffffff"?"白":"この色で描く"}" style="background:${c}"></button>`
+  ).join("");
+}
+document.getElementById("new-colors").addEventListener("click", (e)=>{
+  const b = e.target.closest("[data-newcolor]");
+  if (!b) return;
+  newPartColor = b.dataset.newcolor;
+  renderNewColors();
+});
+renderNewColors();
 
 // ----- 曲線の腕：連動 / 片側ずつ -----
 document.getElementById("btn-mirror").addEventListener("click", ()=>{
