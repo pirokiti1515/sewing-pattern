@@ -148,6 +148,12 @@
     stroke-linecap: round; vector-effect: non-scaling-stroke;
   }
   .arrowline { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+  /* ファスナー */
+  .zipline { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+  .ziptooth { stroke-width: 2.2; vector-effect: non-scaling-stroke; stroke-linecap: butt; }
+  .zipslider { stroke-width: 1; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+  .zipstem { stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+  .ziptab { stroke-width: 1.4; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
   .dimline { fill: none; stroke-width: 1.2; vector-effect: non-scaling-stroke; }
   .dimtick { stroke-width: 1.2; vector-effect: non-scaling-stroke; }
   .dimtext { font-size: 12px; font-weight: 700; paint-order: stroke; stroke: #fff; stroke-width: 3px; dominant-baseline: middle; }
@@ -298,6 +304,11 @@
       <label title="輪郭の内側に、この距離で平行なステッチ点線を入れます">内側<input type="number" id="stitch-mm" value="5" min="1" step="1" style="width:44px">mm</label>
       <button id="btn-stitch-inside" title="選択中のパーツの内側にステッチを入れる">🧵 内側に入れる</button>
     </span>
+    <span class="ctx" id="ctx-zip">
+      <span class="sep"></span>
+      <label title="ファスナーの歯の間隔">歯<input type="number" id="zip-pitch" value="3" min="1" max="20" step="0.5" style="width:44px">mm</label>
+      <button id="btn-zip-flip" title="スライダーを反対の端に move">⇄ スライダーの位置</button>
+    </span>
     <!-- 文字ツールの時だけ：文字サイズ -->
     <span class="ctx" id="ctx-text">
       <span class="sep"></span>
@@ -378,17 +389,13 @@
       </div>
       <button class="tool" data-tool="text" id="tool-text" title="文字 (T)"><span class="ic">T</span><span class="tl">文字</span></button>
       <button class="tool" data-tool="stitch" id="tool-stitch" title="ステッチ線 (S)"><span class="ic">🧵</span><span class="tl">ステッチ</span></button>
+      <button class="tool" data-tool="zip" id="tool-zip" title="ファスナー (F)"><span class="ic">⛓</span><span class="tl">ファスナー</span></button>
       <button class="tool" data-tool="dim" id="tool-dim" title="寸法線 (D)"><span class="ic">📏</span><span class="tl">寸法線</span></button>
       <button class="tool" data-tool="arrow" id="tool-arrow" title="矢印：地の目・引き出し線 (A)"><span class="ic">↗</span><span class="tl">矢印</span></button>
       <button class="tool" data-tool="notch" id="tool-notch" title="合印 (N)"><span class="ic">⊹</span><span class="tl">合印</span></button>
     </div>
     <div id="canvas-wrap">
       <svg id="svg" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M0,0 L10,5 L0,10 z" fill="context-stroke"></path>
-          </marker>
-        </defs>
         <g id="g-grid"></g>
         <g id="g-parts"></g>
         <g id="g-texts"></g>
@@ -498,6 +505,31 @@ let selVertex = null;       // {partId, idx} currently selected anchor (for 接�
 let multiSel = [];          // [{partId, idx}] points selected by the 選択 tool
 let marquee = null;         // {x0,y0,x1,y1} rubber-band rectangle (screen px)
 let selMove = null;         // {startW, orig:[{partId,idx,x,y}], origTexts, origNotches} while moving the selection
+// パーツの上に乗っている線（ファスナー・ステッチ・矢印・寸法線）を拾う。
+// 全部の点がそのパーツの内側にあるものだけを「乗っている」とみなす。
+// グループ化しなくてもパーツと一緒に動くようにするための仕組み。
+// 親子関係は持たせないので、線だけを選んで単体で動かすのも今までどおりできる。
+const RIDER_KINDS = ["zip","stitch","arrow","dim"];
+function ridersOf(partIds){
+  const hosts = partIds.map(id=>project.parts.find(p=>p.id===id))
+                       .filter(p=>p && p.closed && p.nodes.length>=3)
+                       .map(p=>flattenNodes(p.nodes, true));
+  if (!hosts.length) return [];
+  const out = [];
+  for (const p of project.parts){
+    if (RIDER_KINDS.indexOf(p.kind)<0 || partIds.indexOf(p.id)>=0 || !p.nodes.length) continue;
+    if (p.nodes.every(n => hosts.some(h => pointInPoly(n, h)))) out.push(p);
+  }
+  return out;
+}
+// 動かす点の一覧に、乗っている線の点を足す
+function withRiders(list){
+  const ids = [...new Set(list.map(m=>m.partId))];
+  const extra = [];
+  for (const r of ridersOf(ids)) r.nodes.forEach((_,i)=>extra.push({ partId:r.id, idx:i }));
+  return extra.length ? list.concat(extra) : list;
+}
+
 // 選択を動かすときの控え。点が全部選ばれているパーツは合印も一緒に動かす
 // （置き去りにすると、見えている場所と保存位置がずれて合印を消せなくなる）
 function captureNotches(list){
@@ -847,6 +879,7 @@ function findResizeHandleAt(sp){
   return null;
 }
 function beginScale(h, wp){
+  multiSel = withRiders(multiSel);        // 上に乗っている線も一緒に伸び縮みさせる
   const partIds = [...new Set(multiSel.map(m=>m.partId))];
   scaleDrag = {
     h, anchor:{ x:h.ax, y:h.ay }, from:{ x:h.x, y:h.y },
@@ -1285,6 +1318,7 @@ const MODE_INFO = {
   ellipse: { icon:"◯",  name:"円モード" },
   text:    { icon:"T",  name:"文字モード" },
   stitch:  { icon:"🧵", name:"ステッチモード" },
+  zip:     { icon:"⛓", name:"ファスナーモード" },
   arrow:   { icon:"↗",  name:"矢印モード" },
   dim:     { icon:"📏", name:"寸法線モード" },
   select:  { icon:"⬚",  name:"選択・編集モード" },
@@ -1316,6 +1350,7 @@ function updateContextBar(){
     }
   }
   document.getElementById("ctx-stitch").classList.toggle("show", tool==="stitch");
+  document.getElementById("ctx-zip").classList.toggle("show", tool==="zip" || (tool==="select" && selectedZip()));
   // 腕の連動スイッチの見た目
   const mb = document.getElementById("btn-mirror");
   mb.classList.toggle("on", handleMirror);
@@ -1363,14 +1398,16 @@ function renderShapePreview(){
   const a = shapeDrag.start, b = maybeSnap(mouseWorld);
   if (tool==="arrow"){
     const sa = worldToScreen(a), sb = worldToScreen(b);
-    gDraft.appendChild(mk("path", { d:`M${sa.x} ${sa.y} L${sb.x} ${sb.y}`, class:"arrowline", stroke:"#2563eb", "marker-end":"url(#arrowhead)" }));
+    gDraft.appendChild(mk("path", { d:`M${sa.x} ${sa.y} L${sb.x} ${sb.y}`, class:"arrowline", stroke:"#2563eb" }));
+    addArrowHead(gDraft, sb, sa, "#2563eb", 11);
     return;
   }
   if (tool==="dim"){
     const c = snapToVertex(mouseWorld);
     const sa = worldToScreen(a), sb = worldToScreen(c);
-    gDraft.appendChild(mk("path", { d:`M${sa.x} ${sa.y} L${sb.x} ${sb.y}`, class:"dimline", stroke:"#2563eb",
-      "marker-start":"url(#arrowhead)", "marker-end":"url(#arrowhead)" }));
+    gDraft.appendChild(mk("path", { d:`M${sa.x} ${sa.y} L${sb.x} ${sb.y}`, class:"dimline", stroke:"#2563eb" }));
+    addArrowHead(gDraft, sa, sb, "#2563eb", 9);
+    addArrowHead(gDraft, sb, sa, "#2563eb", 9);
     const t = mk("text", { x:(sa.x+sb.x)/2, y:(sa.y+sb.y)/2-8, class:"dimtext", fill:"#2563eb", "text-anchor":"middle" });
     t.textContent = Math.round(Math.hypot(c.x-a.x, c.y-a.y)) + "mm";
     gDraft.appendChild(t);
@@ -1521,11 +1558,18 @@ function renderParts(){
       continue;
     }
     // dimension: arrows at both ends + the measured length, recomputed live
+    // ファスナー：中心線＋左右の歯＋スライダー（入る位置がひと目で分かるように）
+    if (part.kind==="zip"){
+      drawZip(frag, part);
+      continue;
+    }
     if (part.kind==="dim"){
       const A=part.nodes[0], B=part.nodes[1];
       const sa=worldToScreen(A), sb=worldToScreen(B);
       frag.appendChild(mk("path", { d:`M${sa.x} ${sa.y} L${sb.x} ${sb.y}`, class:"dimline", stroke:part.color,
-        "marker-start":"url(#arrowhead)", "marker-end":"url(#arrowhead)", "data-part":part.id }));
+        "data-part":part.id }));
+      addArrowHead(frag, sa, sb, part.color, 9);   // 両端に外向きの矢じり
+      addArrowHead(frag, sb, sa, part.color, 9);
       // short perpendicular ticks at each end
       let ux=B.x-A.x, uy=B.y-A.y; const L=Math.hypot(ux,uy)||1; ux/=L; uy/=L;
       const px=-uy, py=ux, t=5;
@@ -1543,7 +1587,18 @@ function renderParts(){
     // arrow: an open path with an arrowhead (grain direction / leader line)
     if (part.kind==="arrow"){
       frag.appendChild(mk("path", { d: nodesScreenPath(part.nodes, false), class:"arrowline", stroke: lineColorOf(part),
-        "marker-end": "url(#arrowhead)", "data-part": part.id }));
+        "data-part": part.id }));
+      // 曲がっていても向きが合うよう、折れ線に直した最後の1区間から向きを取る
+      const fl = flattenNodes(part.nodes, false);
+      if (fl.length >= 2){
+        const tip = worldToScreen(fl[fl.length-1]);
+        let prev = null;
+        for (let i = fl.length-2; i >= 0; i--){
+          const s = worldToScreen(fl[i]);
+          if (Math.hypot(tip.x-s.x, tip.y-s.y) > 0.5){ prev = s; break; }
+        }
+        if (prev) addArrowHead(frag, tip, prev, lineColorOf(part), 11);
+      }
       continue;
     }
     const selected = part.id === selectedPartId;
@@ -1735,6 +1790,79 @@ const DEFAULT_COLOR = "#111827"; // パーツは黒で始まる。色は後か�
 let newPartColor = DEFAULT_COLOR;  // これから描くパーツの色（図形ツールの色えらびで変える）
 // 白いパーツは白い画布に溶けてしまうので、線だけ黒で描く（塗りは白のまま）
 const isWhite = (c)=> { const s=(c||"").toLowerCase(); return s==="#ffffff" || s==="#fff" || s==="white"; };
+// 矢じりは marker を使わず、実際の三角形として描く。
+// marker + fill="context-stroke" は印刷時に塗られず「ただの線」になる環境があるため。
+// 折れ線に沿って dist mm 進んだ位置と、その場所の向き
+function polyWalk(flat, dist){
+  let acc = 0;
+  for (let i=0;i<flat.length-1;i++){
+    const a=flat[i], b=flat[i+1];
+    const L=Math.hypot(b.x-a.x, b.y-a.y);
+    if (L<1e-9) continue;
+    if (acc+L >= dist){
+      const t=(dist-acc)/L;
+      return { pt:{x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t}, ux:(b.x-a.x)/L, uy:(b.y-a.y)/L };
+    }
+    acc+=L;
+  }
+  const a=flat[flat.length-2], b=flat[flat.length-1];
+  const L=Math.hypot(b.x-a.x, b.y-a.y)||1;
+  return { pt:{x:b.x,y:b.y}, ux:(b.x-a.x)/L, uy:(b.y-a.y)/L };
+}
+function polyLength(flat){
+  let s=0; for (let i=0;i<flat.length-1;i++) s+=Math.hypot(flat[i+1].x-flat[i].x, flat[i+1].y-flat[i].y);
+  return s;
+}
+// ファスナー：中心線＋左右に並ぶ歯＋スライダー（引き手付き）を描く
+function drawZip(frag, part){
+  const col = lineColorOf(part);
+  const flat = flattenNodes(part.nodes, false);
+  if (flat.length < 2) return;
+  frag.appendChild(mk("path", { d: nodesScreenPath(part.nodes, false), class:"zipline", stroke: col, "data-part": part.id }));
+
+  const total = polyLength(flat);
+  const pitch = Math.max(1, part.zipPitch || 3);
+  const arm = 1.8;                                   // 歯の長さ（片側mm）
+  if (pitch * view.scale >= 3){                      // 細かすぎて潰れる時は歯を省く
+    for (let d = pitch/2; d < total; d += pitch){
+      const w = polyWalk(flat, d);
+      const px = -w.uy, py = w.ux;
+      const a = worldToScreen({ x:w.pt.x+px*arm, y:w.pt.y+py*arm });
+      const b = worldToScreen({ x:w.pt.x-px*arm, y:w.pt.y-py*arm });
+      frag.appendChild(mk("line", { x1:a.x, y1:a.y, x2:b.x, y2:b.y, class:"ziptooth", stroke:col }));
+    }
+  }
+  // スライダー本体（先が細い形）と引き手。外側へ向けて置く
+  const bodyL = 12, bodyW = 7;
+  const atEnd = (part.zipEnd !== 0);
+  if (total < bodyL*0.6) return;                     // 短すぎる線には付けない
+  const d0 = atEnd ? Math.max(0, total - bodyL/2) : Math.min(total, bodyL/2);
+  const w = polyWalk(flat, d0);
+  const ux = atEnd ? w.ux : -w.ux, uy = atEnd ? w.uy : -w.uy;   // 外向き
+  const px = -uy, py = ux, c = w.pt;
+  const P = (along, side)=> worldToScreen({ x:c.x+ux*along+px*side, y:c.y+uy*along+py*side });
+  const poly = (pts)=> "M" + pts.map(q=>q.x+" "+q.y).join(" L") + " Z";
+
+  frag.appendChild(mk("path", {
+    d: poly([P(-bodyL/2,0), P(-bodyL/6,bodyW/2), P(bodyL/2,bodyW/2), P(bodyL/2,-bodyW/2), P(-bodyL/6,-bodyW/2)]),
+    class:"zipslider", fill:col, stroke:col, "data-part":part.id }));
+  const s1 = P(bodyL/2,0), s2 = P(bodyL/2+3,0);
+  frag.appendChild(mk("line", { x1:s1.x, y1:s1.y, x2:s2.x, y2:s2.y, class:"zipstem", stroke:col }));
+  frag.appendChild(mk("path", {
+    d: poly([P(bodyL/2+3,2.4), P(bodyL/2+9,2.4), P(bodyL/2+9,-2.4), P(bodyL/2+3,-2.4)]),
+    class:"ziptab", fill:"#ffffff", stroke:col }));
+}
+function addArrowHead(frag, tip, from, color, size){
+  const dx = tip.x - from.x, dy = tip.y - from.y;
+  const L = Math.hypot(dx, dy);
+  if (!(L > 0.001)) return;
+  const ux = dx/L, uy = dy/L;          // 進行方向
+  const px = -uy, py = ux;             // 直角方向
+  const half = size * 0.42;
+  const bx = tip.x - ux*size, by = tip.y - uy*size;
+  const d = `M${tip.x} ${tip.y} L${bx+px*half} ${by+py*half} L${bx-px*half} ${by-py*half} Z`;
+  frag.appendChild(mk("path", { d, class:"arrowhead", fill: color, stroke: color, "stroke-width": 0.5 }));
+}
 const lineColorOf = (part)=> isWhite(part && part.color) ? "#111827" : (part ? part.color : DEFAULT_COLOR);
 function newPart(nodes, closed){
   const part = { id: "p"+(idCounter++), name: "", qty: 1, fabric: "", color: newPartColor, seam: 0, stitch: 0, closed: !!closed, group: null, nodes, notches: [] };
@@ -1900,6 +2028,15 @@ function commitDraft(){
   if (draft.kind==="stitch"){
     // stitch line = an OPEN dashed path
     if (draft.nodes.length>=2){ pushUndo(); const p = newPart(draft.nodes.slice(), false); p.kind = "stitch"; p.color = STITCH_COLOR; }
+  } else if (draft.kind==="zip"){
+    // ファスナー = 開いた線。歯とスライダーを重ねて描く
+    if (draft.nodes.length>=2){
+      pushUndo();
+      const p = newPart(draft.nodes.slice(), false);
+      p.kind = "zip"; p.color = "#111827";
+      p.zipPitch = Math.max(1, parseFloat(document.getElementById("zip-pitch").value)||3);
+      p.zipEnd = 1;                      // スライダーは終点側から
+    }
   } else {
     if (draft.nodes.length>=2){ pushUndo(); }
     if (draft.nodes.length>=3){ newPart(draft.nodes.slice(), true); }
@@ -1971,35 +2108,6 @@ svg.addEventListener("mousedown", (e)=>{
   // ===== 選択・編集ツール（すべてここに集約）=====
   // 曲線ハンドル → 頂点 → 辺 → パーツ全体 → 範囲選択 の順に判定する
   if (tool==="select"){
-    // 文字を最優先で拾う（クリックで選択、ドラッグで移動、ダブルクリックで編集）
-    const ht = findTextAt(wp);
-    if (ht){
-      const now = Date.now();
-      if (lastTClick.id===ht.id && (now - lastTClick.t) < 400){
-        lastTClick = { id:null, t:0 }; render(); openTextEditor(ht, false); return;
-      }
-      lastTClick = { id:ht.id, t:now };
-      // すでに複数選択の一部なら、その選択をまとめて動かす
-      const inSel = selTexts.includes(ht.id);
-      const spanning = multiSel.length>0 || selTexts.length>1;
-      if (inSel && spanning){
-        selectedPartId = selectedPartId || null; selVertex = null;
-        selMove = makeSelMove(wp, multiSel);
-        render(); return;
-      }
-      // グループに属する文字なら、そのグループごと選ぶ
-      if (ht.group){
-        const gp = project.parts.filter(p=>p.group===ht.group);
-        const gt = project.texts.filter(t=>t.group===ht.group).map(t=>t.id);
-        multiSel = []; gp.forEach(p=>p.nodes.forEach((_,i)=>multiSel.push({partId:p.id, idx:i})));
-        selTexts = gt; selectedPartId = gp.length?gp[0].id:null; selVertex = null; selMode = "part";
-        selMove = makeSelMove(wp, multiSel);
-        render(); return;
-      }
-      selTexts = [ht.id]; selectedPartId = null; multiSel = []; selVertex = null;
-      textDrag = { id:ht.id, startW:wp, ox:ht.x, oy:ht.y, moved:false, editOnClick:false };
-      render(); return;
-    }
     // textIds を省くと「今選んでいる文字」がそのまま付いてくる。
     // 点や辺をつかむ操作では [] を渡して文字を切り離すこと（一緒に動いてしまうため）。
     const startMove = (list, textIds)=>{
@@ -2057,15 +2165,49 @@ svg.addEventListener("mousedown", (e)=>{
         render(); return;
       }
     }
-    // 5) パーツ／線をクリック：まるごと選択（グループなら全部）
-    const part = findPartAt(wp) || findLinePartAt(wp);
+    // 5) 文字：編集ハンドル（枠・腕・点・辺の中央）より後に判定する。
+    //    先に判定すると、文字の上に重なったハンドルがつかめず文字が選ばれてしまう。
+    //    パーツ本体よりは先なので、文字の上をクリックすれば文字が選べる。
+    const ht = findTextAt(wp);
+    if (ht){
+      const now = Date.now();
+      if (lastTClick.id===ht.id && (now - lastTClick.t) < 400){
+        lastTClick = { id:null, t:0 }; render(); openTextEditor(ht, false); return;
+      }
+      lastTClick = { id:ht.id, t:now };
+      // すでに複数選択の一部なら、その選択をまとめて動かす
+      const inSel = selTexts.includes(ht.id);
+      const spanning = multiSel.length>0 || selTexts.length>1;
+      if (inSel && spanning){
+        selectedPartId = selectedPartId || null; selVertex = null;
+        selMove = makeSelMove(wp, multiSel);
+        render(); return;
+      }
+      // グループに属する文字なら、そのグループごと選ぶ
+      if (ht.group){
+        const gp = project.parts.filter(p=>p.group===ht.group);
+        const gt = project.texts.filter(t=>t.group===ht.group).map(t=>t.id);
+        multiSel = []; gp.forEach(p=>p.nodes.forEach((_,i)=>multiSel.push({partId:p.id, idx:i})));
+        selTexts = gt; selectedPartId = gp.length?gp[0].id:null; selVertex = null; selMode = "part";
+        selMove = makeSelMove(wp, multiSel);
+        render(); return;
+      }
+      selTexts = [ht.id]; selectedPartId = null; multiSel = []; selVertex = null;
+      textDrag = { id:ht.id, startW:wp, ox:ht.x, oy:ht.y, moved:false, editOnClick:false };
+      render(); return;
+    }
+    // 6) パーツ／線をクリック：まるごと選択（グループなら全部）
+    // 線（ファスナー・ステッチ・矢印・寸法線）を先に見る。
+    // パーツを先にすると、パーツの上に乗った線がつかめず位置を直せない。
+    // 線は細い当たり判定なので、線の近くをクリックした時だけ勝つ。
+    const part = findLinePartAt(wp) || findPartAt(wp);
     if (part){
       // すでに複数選択されている中のパーツを掴んだら、選択はそのままで全部動かす
       const inSel = multiSel.some(m=>m.partId===part.id);
       const spanning = new Set(multiSel.map(m=>m.partId)).size > 1 || selTexts.length > 0;
       if (inSel && spanning){
         selectedPartId = part.id; selVertex = null;
-        startMove(multiSel);
+        startMove(withRiders(multiSel));      // 上に乗っている線も連れて行く
         render(); return;
       }
       selectedPartId = part.id; selVertex = null; selMode = "part";
@@ -2074,10 +2216,10 @@ svg.addEventListener("mousedown", (e)=>{
       const groupTexts = g ? project.texts.filter(t=>t.group===g).map(t=>t.id) : [];
       const list = [];
       for (const gp of groupParts) gp.nodes.forEach((_,i)=>list.push({ partId:gp.id, idx:i }));
-      startMove(list, groupTexts);
+      startMove(withRiders(list), groupTexts);   // 上に乗っている線も連れて行く
       render(); return;
     }
-    // 6) 空き：範囲選択
+    // 7) 空き：範囲選択
     multiSel = []; selectedPartId = null; selVertex = null; selMode = "points"; selTexts = [];
     marquee = { x0:sp.x, y0:sp.y, x1:sp.x, y1:sp.y };
     render(); return;
@@ -2098,7 +2240,7 @@ svg.addEventListener("mousedown", (e)=>{
       return;
     }
   }
-  if (tool==="draw" || tool==="stitch"){
+  if (tool==="draw" || tool==="stitch" || tool==="zip"){
     // pen/stitch: click near the first point closes (draw only; stitch stays open)
     if (tool==="draw" && draft && draft.nodes.length>=2){
       const s0 = worldToScreen(draft.nodes[0]);
@@ -2106,7 +2248,7 @@ svg.addEventListener("mousedown", (e)=>{
     }
     // place an anchor; drag before releasing pulls out symmetric bézier handles
     const p = maybeSnap(wp);
-    if (!draft) draft = { nodes: [], kind: (tool==="stitch" ? "stitch" : "part") };
+    if (!draft) draft = { nodes: [], kind: (tool==="stitch" ? "stitch" : tool==="zip" ? "zip" : "part") };
     const node = { x:p.x, y:p.y, hIn:null, hOut:null };
     draft.nodes.push(node);
     penDrag = { index: draft.nodes.length-1, anchor: { x:p.x, y:p.y } };
@@ -2282,7 +2424,7 @@ svg.addEventListener("mouseleave", ()=>{ endCtrlPan(); });
 
 svg.addEventListener("dblclick", (e)=>{
   if (tool==="draw" && draft && draft.nodes.length>=3){ e.preventDefault(); commitDraft(); }
-  else if (tool==="stitch" && draft && draft.nodes.length>=2){ e.preventDefault(); commitDraft(); }
+  else if ((tool==="stitch" || tool==="zip") && draft && draft.nodes.length>=2){ e.preventDefault(); commitDraft(); }
 });
 
 // Right-click: delete a notch / vertex if pointing at one; otherwise show the menu
@@ -2348,7 +2490,7 @@ function showObjectMenu(x, y, part, text){
   ctxTarget = text ? { text } : { part };
   const cur = text ? (text.color||"#111827") : (part.color||"#2563eb");
   const label = text ? `「${(text.text||"文字").slice(0,10)}」`
-                     : (part.kind==="stitch" ? "🧵 ステッチ線" : part.kind==="arrow" ? "↗ 矢印"
+                     : (part.kind==="stitch" ? "🧵 ステッチ線" : part.kind==="zip" ? "⛓ ファスナー" : part.kind==="arrow" ? "↗ 矢印"
                         : (part.name && part.name.trim() ? "▭ "+part.name : "▭ パーツ"));
   const m = document.getElementById("context-menu");
   m.innerHTML = `
@@ -2429,7 +2571,7 @@ window.addEventListener("keydown", (e)=>{
     if (copySelection()){ deleteSelection(); } return; }
   // tool keyboard shortcuts (Affinity-style)
   if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length===1){
-    const map = { v:"select", p:"draw", t:"text", r:"rect", o:"ellipse", e:"select", n:"notch", s:"stitch", a:"arrow", d:"dim" };
+    const map = { v:"select", p:"draw", t:"text", r:"rect", o:"ellipse", e:"select", n:"notch", s:"stitch", a:"arrow", d:"dim", f:"zip" };
     const k = e.key.toLowerCase();
     if (map[k]){ e.preventDefault(); setTool(map[k]); return; }
   }
@@ -2594,6 +2736,26 @@ document.getElementById("new-colors").addEventListener("click", (e)=>{
 });
 renderNewColors();
 
+// ----- ファスナー -----
+// 選択中のファスナー（選択ツールで選んでいる時に設定を出すため）
+function selectedZip(){
+  const ids = new Set(multiSel.map(m=>m.partId));
+  if (selectedPartId) ids.add(selectedPartId);
+  return [...ids].map(id=>project.parts.find(p=>p.id===id)).find(p=>p && p.kind==="zip") || null;
+}
+document.getElementById("zip-pitch").addEventListener("input", ()=>{
+  const z = selectedZip(); if (!z) return;           // 選んでいなければ次に描く時の設定
+  z.zipPitch = Math.max(1, parseFloat(document.getElementById("zip-pitch").value)||3);
+  saveLocal(); render();
+});
+document.getElementById("btn-zip-flip").addEventListener("click", ()=>{
+  const z = selectedZip();
+  if (!z){ alert("ファスナーの線を選んでから押してください。"); return; }
+  pushUndo();
+  z.zipEnd = (z.zipEnd===0) ? 1 : 0;
+  saveLocal(); render();
+});
+
 // ----- 曲線の腕：連動 / 片側ずつ -----
 document.getElementById("btn-mirror").addEventListener("click", ()=>{
   handleMirror = !handleMirror; render();
@@ -2688,8 +2850,7 @@ function buildPrintSVG(plan, forPrint, previewPx){
   } else { view.tx = 0; view.ty = 0; }
   suppressListRender = true;
   renderParts(); renderTexts();
-  // marker の id が本体と重ならないよう振り替える
-  const body = (gParts.innerHTML + gTexts.innerHTML).replace(/url\(#arrowhead\)/g, "url(#pd-arrowhead)");
+  const body = gParts.innerHTML + gTexts.innerHTML;   // 矢じりは実体の三角形なので marker の付け替えは不要
   suppressListRender = false;
   view = sv; vpW = svp[0]; vpH = svp[1];
   selectedPartId = ssel; multiSel = sms; selTexts = sst; draft = sdraft;
@@ -2708,7 +2869,6 @@ function buildPrintSVG(plan, forPrint, previewPx){
     ? `width="${plan.paperW}mm" height="${plan.paperH}mm"`
     : `width="${previewPx.w}" height="${previewPx.h}"`;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PW} ${PH}" ${size}>
-    <defs><marker id="pd-arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="context-stroke"></path></marker></defs>
     <rect x="0" y="0" width="${PW}" height="${PH}" fill="#ffffff"></rect>
     ${parts.join("")}
     ${body}
