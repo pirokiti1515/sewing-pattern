@@ -200,6 +200,9 @@
   #context-menu .cm-colors .chip { width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(255,255,255,.4); cursor: pointer; padding: 0; }
   #context-menu .cm-colors .chip:hover { transform: scale(1.2); }
   #context-menu .cm-sep { height: 1px; background: #4b5563; margin: 4px 0; }
+  #context-menu .cm-row { display: flex; align-items: center; gap: 6px; padding: 5px 10px; font-size: 12px; color: #e5e7eb; }
+  #context-menu .cm-row input { width: 56px; background: #111827; color: #f9fafb; border: 1px solid #4b5563;
+    border-radius: 4px; padding: 3px 5px; font-size: 12px; }
 
   /* ---- 印刷プレビュー ---- */
   #print-back { display:none; position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:60; }
@@ -1603,6 +1606,11 @@ function renderParts(){
     }
     const selected = part.id === selectedPartId;
     const flat = flattenNodes(part.nodes, part.closed);
+    // 白いパーツは塗りが不透明なので、塗りだけ先に敷く。
+    // 後ろに回さないと、この後に描くステッチ線や縫い代線を塗りつぶして隠してしまう。
+    if (isWhite(part.color) && part.closed && part.nodes.length >= 3){
+      frag.appendChild(mk("path", { d: partScreenPath(part), fill: part.color, stroke: "none" }));
+    }
     // seam allowance (draw first, underneath) — offset the flattened outline
     if (part.closed && part.seam > 0 && part.nodes.length >= 3){
       const off = outwardOffset(flat, part.seam);
@@ -1632,8 +1640,8 @@ function renderParts(){
       fill: part.color, stroke: lineColorOf(part),
       "data-part": part.id
     });
-    // 白のときは塗りを不透明な白にして、縁取りの黒で形が分かるようにする
-    if (isWhite(part.color)) path.style.fillOpacity = 1;
+    // 白は塗りを上で先に敷いてあるので、こちらは線だけ（塗ると上の線を隠してしまう）
+    if (isWhite(part.color)) path.setAttribute("fill", "none");
     // 線幅の指定があれば使う。CSSの指定に勝たせるため style で当てる
     if (part.lw > 0) path.style.strokeWidth = (selected ? part.lw + 1 : part.lw);
     frag.appendChild(path);
@@ -2467,12 +2475,23 @@ function openContextMenu(sp){
   // right-clicked ON an object -> that object's menu (colour / duplicate / delete)
   const wp = screenToWorld(sp.x, sp.y);
   const txt = findTextAt(wp);
-  const obj = findPartAt(wp) || findLinePartAt(wp);
+  // 線（ファスナー等）を先に見る。パーツを先にすると、上に乗った線の右クリックが
+  // 下のパーツのメニューになってしまい、線の設定を触れない。
+  const obj = findLinePartAt(wp) || findPartAt(wp);
   if (txt || obj){ showObjectMenu(sp.x, sp.y, obj, txt); return; }
   // otherwise: the file/view menu
   showFileMenu(sp.x, sp.y);
 }
 let ctxTarget = null;   // { part } or { text } the object menu is acting on
+// 右クリックメニューの中の「歯の間隔」をその場で反映する
+document.getElementById("context-menu").addEventListener("input", (e)=>{
+  if (e.target.id !== "cm-zip-pitch" || !ctxTarget || !ctxTarget.part) return;
+  ctxTarget.part.zipPitch = Math.min(20, Math.max(1, parseFloat(e.target.value)||3));
+  saveLocal(); render();
+});
+document.getElementById("context-menu").addEventListener("focusin", (e)=>{
+  if (e.target.id === "cm-zip-pitch") pushUndo();
+});
 function placeMenu(m, x, y){
   m.style.left = x + "px"; m.style.top = y + "px"; m.classList.add("show");
 }
@@ -2502,6 +2521,11 @@ function showObjectMenu(x, y, part, text){
     ${(part && part.closed && !part.kind) ? (part.stitch>0
         ? `<button data-cmd="stitchoff">🧵 内側のステッチを消す</button>`
         : `<button data-cmd="stitchon">🧵 内側にステッチを入れる</button>`) : ""}
+    ${(part && part.kind==="zip") ? `
+      <button data-cmd="zipflip">⇄ スライダーを反対側へ</button>
+      <div class="cm-row">歯の間隔
+        <input type="number" id="cm-zip-pitch" value="${part.zipPitch||3}" min="1" max="20" step="0.5">mm
+      </div>` : ""}
     ${part ? `<button data-cmd="dupobj">複製</button>` : ""}
     <button data-cmd="delobj">🗑 削除</button>`;
   placeMenu(m, x, y);
@@ -2516,6 +2540,8 @@ document.getElementById("context-menu").addEventListener("click", (e)=>{
     if (ctxTarget.text) ctxTarget.text.color = c; else ctxTarget.part.color = c;
     saveLocal(); render(); hideContextMenu(); return;
   }
+  // 歯の間隔はメニューを開いたまま調整できるようにする
+  if (e.target.id === "cm-zip-pitch") return;
   const cmd = e.target.dataset.cmd; if (!cmd) return;
   hideContextMenu();
   if (cmd==="new") newProject();
@@ -2535,6 +2561,12 @@ document.getElementById("context-menu").addEventListener("click", (e)=>{
   }
   else if (cmd==="stitchoff" && ctxTarget && ctxTarget.part){
     stitchInside(ctxTarget.part, 0);
+  }
+  else if (cmd==="zipflip" && ctxTarget && ctxTarget.part){
+    pushUndo();
+    const z = ctxTarget.part;
+    z.zipEnd = (z.zipEnd===0) ? 1 : 0;
+    saveLocal(); render();
   }
   else if (cmd==="dupobj" && ctxTarget && ctxTarget.part){
     pushUndo();
