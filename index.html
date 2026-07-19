@@ -262,11 +262,15 @@
     <!-- 編集ツールの時だけ：接円弧 -->
     <span class="ctx" id="ctx-edit">
       <span class="sep"></span>
-      <label title="角を選んでからスライダーで丸める">⌒接円弧
-        <input type="range" id="fillet-slider" min="0" max="150" value="20" style="width:90px">
-        <input type="number" id="fillet-r" value="20" min="0" step="1" style="width:44px">mm
-      </label>
       <button id="btn-mirror" class="toggle on" title="曲線の腕（ハンドル）を左右そろえて動かすか、片方ずつ動かすか。Altを押している間は一時的に逆になります">⇔ 腕を連動</button>
+    </span>
+    <span class="ctx" id="ctx-fillet">
+      <span class="sep"></span>
+      <label title="選んだ角を丸めます。半径を動かすと選択中の角すべてに効きます">⌒半径
+        <input type="range" id="fillet-slider" min="0" max="150" value="20" style="width:110px">
+        <input type="number" id="fillet-r" value="20" min="0" step="1" style="width:48px">mm
+      </label>
+      <span id="fillet-count" style="opacity:.8"></span>
     </span>
     <span class="ctx" id="ctx-stroke">
       <span class="sep"></span>
@@ -396,6 +400,7 @@
       <button class="tool" data-tool="dim" id="tool-dim" title="寸法線 (D)"><span class="ic">📏</span><span class="tl">寸法線</span></button>
       <button class="tool" data-tool="arrow" id="tool-arrow" title="矢印：地の目・引き出し線 (A)"><span class="ic">↗</span><span class="tl">矢印</span></button>
       <button class="tool" data-tool="notch" id="tool-notch" title="合印 (N)"><span class="ic">⊹</span><span class="tl">合印</span></button>
+      <button class="tool" data-tool="fillet" id="tool-fillet" title="接円弧：角を丸める (C)"><span class="ic">⌒</span><span class="tl">接円弧</span></button>
     </div>
     <div id="canvas-wrap">
       <svg id="svg" xmlns="http://www.w3.org/2000/svg">
@@ -1325,7 +1330,8 @@ const MODE_INFO = {
   arrow:   { icon:"↗",  name:"矢印モード" },
   dim:     { icon:"📏", name:"寸法線モード" },
   select:  { icon:"⬚",  name:"選択・編集モード" },
-  notch:   { icon:"⊹",  name:"合印モード" }
+  notch:   { icon:"⊹",  name:"合印モード" },
+  fillet:  { icon:"⌒",  name:"接円弧モード" }
 };
 function updateModeBadge(){
   const m = MODE_INFO[tool] || { icon:"", name:tool };
@@ -1337,6 +1343,11 @@ function updateModeBadge(){
 function updateContextBar(){
   document.getElementById("ctx-common").classList.add("show");
   document.getElementById("ctx-edit").classList.toggle("show", tool==="select");
+  document.getElementById("ctx-fillet").classList.toggle("show", tool==="fillet");
+  if (tool==="fillet"){
+    const n = multiSel.length;
+    document.getElementById("fillet-count").textContent = n ? `${n}個の角に適用` : "角をクリックして選ぶ";
+  }
   document.getElementById("ctx-shape").classList.toggle("show", tool==="rect" || tool==="ellipse");
   // これから描くパーツの色：図形とペンで使うので、その2つの時に出す
   document.getElementById("ctx-newcolor").classList.toggle("show", tool==="rect" || tool==="ellipse" || tool==="draw");
@@ -1452,13 +1463,13 @@ function render(){
 
 // Overlay for the 選択 tool: every anchor as a small square (selected ones highlighted) + marquee box.
 function renderSelection(){
-  if (tool!=="select") return;
+  if (tool!=="select" && tool!=="fillet") return;   // 接円弧でも角を見せる
   const frag = document.createDocumentFragment();
   // only show anchors for the selection (or every anchor while rubber-band selecting)
   const selIds = new Set(multiSel.map(m=>m.partId));
   if (selectedPartId) selIds.add(selectedPartId);
   for (const part of project.parts){
-    if (!marquee && !selIds.has(part.id)) continue;
+    if (!marquee && tool!=="fillet" && !selIds.has(part.id)) continue;
     part.nodes.forEach((nd,i)=>{
       const s = worldToScreen(nd);
       const on = multiSel.some(m=>m.partId===part.id && m.idx===i);
@@ -1467,7 +1478,7 @@ function renderSelection(){
   }
   // middle-of-edge handles on the selected part: grab one to move that edge
   const selPart = selectedPartId && project.parts.find(p=>p.id===selectedPartId);
-  if (selPart && !marquee && selPart.nodes.length>=2){
+  if (tool==="select" && selPart && !marquee && selPart.nodes.length>=2){   // 辺の中央は選択ツールだけ
     const n = selPart.nodes.length, segCount = selPart.closed ? n : n-1;
     for (let i=0;i<segCount;i++){
       const m = segMidWorld(selPart.nodes, i, selPart.closed);
@@ -1781,6 +1792,8 @@ function updateHint(){
       : " ・ パーツ/文字をクリックで選択（文字はダブルクリックで編集）・ 空きをドラッグで囲んで選択";
   } else if (tool==="notch"){
     msg += " ・ 輪郭付近をクリックで合印を追加 / 右クリックで削除";
+  } else if (tool==="fillet"){
+    msg += " ・ 角をクリック（パーツをクリック＝全部の角 / ドラッグで囲む＝複数 / Shift+クリックで足し引き）→ 上の半径を動かす";
   }
   hint.textContent = msg;
 }
@@ -2019,7 +2032,8 @@ function setTool(t){
   if (draft && draft.nodes.length && t!==tool) commitDraft();
   if (typeof filletReset==="function") filletReset();
   tool = t;
-  if (t!=="select"){ multiSel = []; marquee = null; selMove = null; }
+  // 接円弧は「選んだ点に効かせる」ツールなので、選択ツールからの点の選択を引き継ぐ
+  if (t!=="select" && t!=="fillet"){ multiSel = []; marquee = null; selMove = null; }
   if (t!=="select" && t!=="text") selTexts = [];
   document.querySelectorAll("button.tool").forEach(b=>b.classList.toggle("active", b.dataset.tool===t));
   // the 図形 (shape) button stands in for rect/ellipse
@@ -2232,6 +2246,26 @@ svg.addEventListener("mousedown", (e)=>{
     // 7) 空き：範囲選択
     multiSel = []; selectedPartId = null; selVertex = null; selMode = "points"; selTexts = [];
     marquee = { x0:sp.x, y0:sp.y, x1:sp.x, y1:sp.y };
+    render(); return;
+  }
+  // 接円弧ツール：丸めたい角を選ぶ（点をクリック／パーツをクリックで全部の角／囲んで複数）
+  if (tool==="fillet"){
+    filletReset();
+    const v = findVertexAt(sp);
+    if (v){
+      const at = multiSel.findIndex(m=>m.partId===v.part.id && m.idx===v.idx);
+      if (e.shiftKey){ if (at>=0) multiSel.splice(at,1); else multiSel.push({partId:v.part.id, idx:v.idx}); }
+      else if (at>=0 && multiSel.length>1){ /* すでに選んである一団はそのまま */ }
+      else multiSel = [{ partId:v.part.id, idx:v.idx }];
+      selectedPartId = v.part.id; selMode = "points"; render(); return;
+    }
+    const part = findPartAt(wp) || findLinePartAt(wp);
+    if (part){                                  // パーツをクリック＝その角を全部選ぶ
+      multiSel = part.nodes.map((_,i)=>({ partId:part.id, idx:i }));
+      selectedPartId = part.id; selMode = "points"; render(); return;
+    }
+    multiSel = []; selectedPartId = null; selMode = "points"; selTexts = [];
+    marquee = { x0:sp.x, y0:sp.y, x1:sp.x, y1:sp.y };   // 囲んで複数選択
     render(); return;
   }
   // ステッチツール：辺をクリックすると、その辺だけに内側の点線を付け外し
@@ -2605,7 +2639,7 @@ window.addEventListener("keydown", (e)=>{
     if (copySelection()){ deleteSelection(); } return; }
   // tool keyboard shortcuts (Affinity-style)
   if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length===1){
-    const map = { v:"select", p:"draw", t:"text", r:"rect", o:"ellipse", e:"select", n:"notch", s:"stitch", a:"arrow", d:"dim", f:"zip" };
+    const map = { v:"select", p:"draw", t:"text", r:"rect", o:"ellipse", e:"select", n:"notch", s:"stitch", a:"arrow", d:"dim", f:"zip", c:"fillet" };
     const k = e.key.toLowerCase();
     if (map[k]){ e.preventDefault(); setTool(map[k]); return; }
   }
@@ -2730,29 +2764,60 @@ document.getElementById("btn-fit").addEventListener("click", fitView);
 document.getElementById("btn-undo").addEventListener("click", undo);
 document.getElementById("btn-redo").addEventListener("click", redo);
 
-// ----- 接円弧 (fillet) live slider -----
-// While a corner is selected in edit mode, the slider rounds it live from the
-// corner's original state (captured once), committing one undo step on release.
-let filletBase = null; // { nodes, partId, idx } — the corner's original state for this session
-function filletLive(r){
-  if (tool!=="select" || !selVertex){ if(!selVertex) filletHint(); return; }
-  const part = project.parts.find(p=>p.id===selVertex.partId);
-  if (!part) return;
-  if (!filletBase || filletBase.partId!==part.id || filletBase.idx!==selVertex.idx){
-    filletBase = { nodes: JSON.parse(JSON.stringify(part.nodes)), partId: part.id, idx: selVertex.idx };
-    pushUndo(); // one undo step for the whole slider session on this corner
+// ----- 接円弧（角を丸める）-----
+// 選んである角すべてに、半径をその場で反映する。
+// スライダーを動かすたびに元の形へ戻してから丸め直すので、行ったり来たりできる。
+// 取り消しは、いじり始めた1回ぶんにまとまる。
+let filletBase = null;   // { parts:{partId:nodesのコピー}, sel:[{partId,idx}] }
+function filletStart(){
+  if (filletBase) return true;
+  if (!multiSel.length) return false;
+  const parts = {};
+  for (const pid of new Set(multiSel.map(m=>m.partId))){
+    const p = project.parts.find(x=>x.id===pid);
+    if (p) parts[pid] = JSON.parse(JSON.stringify(p.nodes));
   }
-  part.nodes = JSON.parse(JSON.stringify(filletBase.nodes));
-  if (r > 0) filletNode(part, filletBase.idx, r);
+  if (!Object.keys(parts).length) return false;
+  pushUndo();                                   // ひと続きの操作で1回だけ
+  filletBase = { parts, sel: multiSel.map(m=>({partId:m.partId, idx:m.idx})) };
+  return true;
+}
+function filletLive(r){
+  if (tool!=="fillet"){ return; }
+  if (!filletStart()){ filletHint(); return; }
+  // まず元の形に戻す
+  for (const pid in filletBase.parts){
+    const p = project.parts.find(x=>x.id===pid);
+    if (p) p.nodes = JSON.parse(JSON.stringify(filletBase.parts[pid]));
+  }
+  if (r > 0){
+    // 1つ丸めるたびに点が1つ増えるので、番号の大きい角から処理する
+    const byPart = {};
+    for (const m of filletBase.sel) (byPart[m.partId] = byPart[m.partId] || []).push(m.idx);
+    for (const pid in byPart){
+      const p = project.parts.find(x=>x.id===pid);
+      if (!p) continue;
+      byPart[pid].sort((a,b)=>b-a).forEach(i=>filletNode(p, i, r));
+    }
+  }
   saveLocal(); render();
 }
 function filletReset(){ filletBase = null; }
 let filletHinted = false;
-function filletHint(){ if(!filletHinted){ filletHinted=true; alert("「✥ 編集」モードで丸めたい角の点をクリックしてから、スライダーを動かしてください。"); } }
+function filletHint(){
+  if (!filletHinted){
+    filletHinted = true;
+    alert("丸めたい角をクリックして選んでから、半径を動かしてください。\n\n・パーツをクリック＝その角を全部選ぶ\n・ドラッグで囲む＝複数の角を選ぶ\n・Shift+クリック＝1つずつ足し引き");
+  }
+}
 const filletSlider = document.getElementById("fillet-slider");
 const filletNum = document.getElementById("fillet-r");
 filletSlider.addEventListener("input", ()=>{ filletNum.value = filletSlider.value; filletLive(+filletSlider.value); });
 filletNum.addEventListener("input", ()=>{ filletSlider.value = filletNum.value; filletLive(+filletNum.value); });
+// 半径を決め終えたら、選択は作り直す（丸めた分だけ点の番号がずれるため）
+const filletCommit = ()=>{ if (filletBase){ filletReset(); multiSel = []; selectedPartId = null; render(); } };
+filletSlider.addEventListener("change", filletCommit);
+filletNum.addEventListener("change", filletCommit);
 
 // ----- これから描くパーツの色えらび（図形ツールの欄） -----
 function renderNewColors(){
