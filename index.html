@@ -1821,19 +1821,20 @@ function drawZip(frag, part){
   frag.appendChild(mk("path", { d: nodesScreenPath(part.nodes, false), class:"zipline", stroke: col, "data-part": part.id }));
 
   const total = polyLength(flat);
-  const pitch = Math.max(1, part.zipPitch || 3);
-  const arm = 1.8;                                   // 歯の長さ（片側mm）
-  if (pitch * view.scale >= 3){                      // 細かすぎて潰れる時は歯を省く
-    for (let d = pitch/2; d < total; d += pitch){
-      const w = polyWalk(flat, d);
-      const px = -w.uy, py = w.ux;
-      const a = worldToScreen({ x:w.pt.x+px*arm, y:w.pt.y+py*arm });
-      const b = worldToScreen({ x:w.pt.x-px*arm, y:w.pt.y-py*arm });
-      frag.appendChild(mk("line", { x1:a.x, y1:a.y, x2:b.x, y2:b.y, class:"ziptooth", stroke:col }));
-    }
+  // ファスナーは「記号」なので、引きで見ても読める最小の大きさを保つ。
+  // 指定mmが画面上で小さくなりすぎる時だけ、画面基準の下限まで広げる。
+  const atLeast = (mm, minPx)=> Math.max(mm, minPx / view.scale);
+  const pitch = atLeast(Math.max(1, part.zipPitch || 3), 7);   // 歯の間隔
+  const arm   = atLeast(1.8, 4);                               // 歯の長さ（片側）
+  for (let d = pitch/2; d < total; d += pitch){
+    const w = polyWalk(flat, d);
+    const px = -w.uy, py = w.ux;
+    const a = worldToScreen({ x:w.pt.x+px*arm, y:w.pt.y+py*arm });
+    const b = worldToScreen({ x:w.pt.x-px*arm, y:w.pt.y-py*arm });
+    frag.appendChild(mk("line", { x1:a.x, y1:a.y, x2:b.x, y2:b.y, class:"ziptooth", stroke:col }));
   }
   // スライダー本体（先が細い形）と引き手。外側へ向けて置く
-  const bodyL = 12, bodyW = 7;
+  const bodyL = atLeast(12, 26), bodyW = atLeast(7, 15);
   const atEnd = (part.zipEnd !== 0);
   if (total < bodyL*0.6) return;                     // 短すぎる線には付けない
   const d0 = atEnd ? Math.max(0, total - bodyL/2) : Math.min(total, bodyL/2);
@@ -1846,10 +1847,11 @@ function drawZip(frag, part){
   frag.appendChild(mk("path", {
     d: poly([P(-bodyL/2,0), P(-bodyL/6,bodyW/2), P(bodyL/2,bodyW/2), P(bodyL/2,-bodyW/2), P(-bodyL/6,-bodyW/2)]),
     class:"zipslider", fill:col, stroke:col, "data-part":part.id }));
-  const s1 = P(bodyL/2,0), s2 = P(bodyL/2+3,0);
+  const stem = bodyL*0.25, tabL = bodyL*0.5, tabW = bodyW*0.34;
+  const s1 = P(bodyL/2,0), s2 = P(bodyL/2+stem,0);
   frag.appendChild(mk("line", { x1:s1.x, y1:s1.y, x2:s2.x, y2:s2.y, class:"zipstem", stroke:col }));
   frag.appendChild(mk("path", {
-    d: poly([P(bodyL/2+3,2.4), P(bodyL/2+9,2.4), P(bodyL/2+9,-2.4), P(bodyL/2+3,-2.4)]),
+    d: poly([P(bodyL/2+stem,tabW), P(bodyL/2+stem+tabL,tabW), P(bodyL/2+stem+tabL,-tabW), P(bodyL/2+stem,-tabW)]),
     class:"ziptab", fill:"#ffffff", stroke:col }));
 }
 function addArrowHead(frag, tip, from, color, size){
