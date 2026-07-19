@@ -1345,8 +1345,8 @@ function updateContextBar(){
   document.getElementById("ctx-edit").classList.toggle("show", tool==="select");
   document.getElementById("ctx-fillet").classList.toggle("show", tool==="fillet");
   if (tool==="fillet"){
-    const n = multiSel.length;
-    document.getElementById("fillet-count").textContent = n ? `${n}個の角に適用` : "角をクリックして選ぶ";
+    const n = filletBase ? filletBase.sel.length : multiSel.length;   // 調整中はその対象数を出す
+    document.getElementById("fillet-count").textContent = n ? `${n}個の角に適用中` : "角をクリックして選ぶ";
   }
   document.getElementById("ctx-shape").classList.toggle("show", tool==="rect" || tool==="ellipse");
   // これから描くパーツの色：図形とペンで使うので、その2つの時に出す
@@ -1793,7 +1793,7 @@ function updateHint(){
   } else if (tool==="notch"){
     msg += " ・ 輪郭付近をクリックで合印を追加 / 右クリックで削除";
   } else if (tool==="fillet"){
-    msg += " ・ 角をクリック（パーツをクリック＝全部の角 / ドラッグで囲む＝複数 / Shift+クリックで足し引き）→ 上の半径を動かす";
+    msg += " ・ 角をクリック（ドラッグで囲む＝複数 / Shift+クリックで足し引き）→ 上の半径で丸める";
   }
   hint.textContent = msg;
 }
@@ -2257,13 +2257,12 @@ svg.addEventListener("mousedown", (e)=>{
       if (e.shiftKey){ if (at>=0) multiSel.splice(at,1); else multiSel.push({partId:v.part.id, idx:v.idx}); }
       else if (at>=0 && multiSel.length>1){ /* すでに選んである一団はそのまま */ }
       else multiSel = [{ partId:v.part.id, idx:v.idx }];
-      selectedPartId = v.part.id; selMode = "points"; render(); return;
+      selectedPartId = v.part.id; selMode = "points";
+      filletApplyToSelection();                 // 今の半径をその場で当てる
+      render(); return;
     }
-    const part = findPartAt(wp) || findLinePartAt(wp);
-    if (part){                                  // パーツをクリック＝その角を全部選ぶ
-      multiSel = part.nodes.map((_,i)=>({ partId:part.id, idx:i }));
-      selectedPartId = part.id; selMode = "points"; render(); return;
-    }
+    // パーツをクリックして全部の角を丸める機能は、誤操作が多いので付けない。
+    // 角そのものをクリックするか、ドラッグで囲んで選ぶ。
     multiSel = []; selectedPartId = null; selMode = "points"; selTexts = [];
     marquee = { x0:sp.x, y0:sp.y, x1:sp.x, y1:sp.y };   // 囲んで複数選択
     render(); return;
@@ -2447,6 +2446,8 @@ window.addEventListener("mouseup", (e)=>{
     }
     shapeDrag = null;
   }
+  // 接円弧：囲んで選び終えた時点で、今の半径を当てる
+  if (tool==="fillet" && marquee){ marquee = null; filletApplyToSelection(); }
   // 形を変えた後は合印を輪郭の上に貼り直す（ずれたままだと消せなくなる）
   if (drag || handleDrag || selMove || scaleDrag){
     if (selMove) resnapMovedNotches(selMove.orig);
@@ -2803,21 +2804,33 @@ function filletLive(r){
   saveLocal(); render();
 }
 function filletReset(){ filletBase = null; }
+// 角を選び直したら、今の半径をその場で適用する。
+// これが無いと「半径を動かした時だけ効く」ので、続けて角を押しても何も起きない。
+function filletApplyToSelection(){
+  if (tool!=="fillet" || !multiSel.length) return;
+  const r = parseFloat(document.getElementById("fillet-r").value);
+  if (!(r > 0)) return;
+  filletLive(r);
+  // 丸めると点の番号がずれるので、選択は解除する。
+  // 残しておくと、次に Shift+クリックした時に古い番号が別の点を指してしまう。
+  // 調整対象は filletBase.sel が覚えているので、スライダーや▲▼は続けて効く。
+  multiSel = [];
+}
 let filletHinted = false;
 function filletHint(){
   if (!filletHinted){
     filletHinted = true;
-    alert("丸めたい角をクリックして選んでから、半径を動かしてください。\n\n・パーツをクリック＝その角を全部選ぶ\n・ドラッグで囲む＝複数の角を選ぶ\n・Shift+クリック＝1つずつ足し引き");
+    alert("丸めたい角をクリックして選んでから、半径を動かしてください。\n\n・ドラッグで囲む＝複数の角をまとめて選ぶ\n・Shift+クリック＝1つずつ足し引き");
   }
 }
 const filletSlider = document.getElementById("fillet-slider");
 const filletNum = document.getElementById("fillet-r");
 filletSlider.addEventListener("input", ()=>{ filletNum.value = filletSlider.value; filletLive(+filletSlider.value); });
 filletNum.addEventListener("input", ()=>{ filletSlider.value = filletNum.value; filletLive(+filletNum.value); });
-// 半径を決め終えたら、選択は作り直す（丸めた分だけ点の番号がずれるため）
-const filletCommit = ()=>{ if (filletBase){ filletReset(); multiSel = []; selectedPartId = null; render(); } };
-filletSlider.addEventListener("change", filletCommit);
-filletNum.addEventListener("change", filletCommit);
+// ここで「決定」して選択を解除してはいけない。
+// 数値欄のスピナーは1回押すたびに change が飛ぶので、2回目以降が効かなくなる。
+// 半径をいじっている間はずっと同じ操作として扱い、
+// 次に図面をクリックした時（またはツールを変えた時）に filletReset() で締める。
 
 // ----- これから描くパーツの色えらび（図形ツールの欄） -----
 function renderNewColors(){
