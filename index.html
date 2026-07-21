@@ -10,11 +10,19 @@
   body { display: flex; flex-direction: column; overflow: hidden; background: #f3f4f6; color: #1f2937; }
 
   /* ---- Top bar (slim: undo/redo + context options + menu) ---- */
+  /* バーの高さは常に一定にする。折り返して2行になると作図面が上下にずれて
+     画面がガクガクするため、はみ出す分は横スクロールで見せる。 */
   #toolbar {
-    display: flex; align-items: center; gap: 6px; flex-wrap: wrap; row-gap: 4px;
+    display: flex; align-items: center; gap: 6px; flex-wrap: nowrap;
     padding: 6px 10px; background: #1f2937; color: #f9fafb;
     box-shadow: 0 1px 3px rgba(0,0,0,.3); z-index: 10;
+    height: 40px; box-sizing: border-box; flex: none;
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
   }
+  #toolbar::-webkit-scrollbar { height: 5px; }
+  #toolbar::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
+  #toolbar > * { flex: none; }                 /* 縮んで潰れないように */
+  .ctx { white-space: nowrap; }
   #toolbar .title { font-weight: 700; margin-right: 10px; font-size: 15px; white-space: nowrap; }
   #toolbar .sep { width: 1px; height: 22px; background: #4b5563; margin: 0 4px; flex-shrink: 0; }
   #toolbar .spacer { flex: 1; }
@@ -68,7 +76,6 @@
   svg.mode-draw { cursor: crosshair; }
   svg.mode-rect { cursor: crosshair; }
   svg.mode-ellipse { cursor: crosshair; }
-  svg.mode-edit { cursor: default; }
   svg.mode-text { cursor: text; }
   svg.mode-stitch { cursor: crosshair; }
   svg.mode-arrow { cursor: crosshair; }
@@ -123,20 +130,14 @@
   .part-item.dragging { opacity: .45; }
   .part-item.drop-before { box-shadow: 0 -3px 0 0 #2563eb; }
   .part-item.drop-after { box-shadow: 0 3px 0 0 #2563eb; }
-  .part-item .ptype { font-size: 13px; width: 16px; text-align: center; flex-shrink: 0; opacity: .75; }
   .part-item.selected { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,.2); }
   .part-item .row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
   .part-item label { font-size: 11px; color: #6b7280; width: 46px; flex-shrink: 0; }
   .part-item input { flex: 1; padding: 3px 5px; font-size: 13px; border: 1px solid #d1d5db; border-radius: 4px; min-width: 0; }
-  .part-item .swatch { width: 22px; height: 22px; padding: 0; border: 1px solid #d1d5db; border-radius: 4px; flex-shrink: 0; cursor: pointer; background: none; }
-  .part-item .chips { gap: 3px; flex-wrap: nowrap; margin-top: 4px; padding-left: 18px; }
   .part-item .chip { width: 15px; height: 15px; border-radius: 50%; border: 1px solid rgba(0,0,0,.15); cursor: pointer; padding: 0; flex: none; }
   .part-item .chip:hover { transform: scale(1.25); }
   .part-item .chip.on { outline: 2px solid #111827; outline-offset: 1px; }
   .part-item .del { margin-left: auto; background: none; border: none; color: #ef4444; cursor: pointer; font-size: 13px; }
-  .part-item .ops { gap: 4px; flex-wrap: wrap; margin-top: 6px; }
-  .part-item .ops button { flex: none; padding: 4px 8px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 5px; background: #f3f4f6; cursor: pointer; }
-  .part-item .ops button:hover { background: #e5e7eb; }
   #empty-note { color: #9ca3af; font-size: 13px; line-height: 1.6; }
 
   /* SVG styles */
@@ -159,7 +160,7 @@
   .zipstem { stroke-width: 1.6; vector-effect: non-scaling-stroke; }
   .ziptab { stroke-width: 1.4; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
   .dimline { fill: none; stroke-width: 1.2; vector-effect: non-scaling-stroke; }
-  .dimtick { stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+  .dimext { stroke-width: 1; vector-effect: non-scaling-stroke; opacity: .85; }
   .dimtext { font-size: 12px; font-weight: 700; paint-order: stroke; stroke: #fff; stroke-width: 3px; dominant-baseline: middle; }
   .notch { stroke-width: 2.5; vector-effect: non-scaling-stroke; stroke-linecap: round; }
   .edge-len { font-size: 11px; fill: #374151; paint-order: stroke; stroke: #fff; stroke-width: 3px; }
@@ -175,6 +176,10 @@
   .edge-hover { fill: none; stroke: #f59e0b; stroke-width: 6; stroke-linecap: round; opacity: .55; vector-effect: non-scaling-stroke; pointer-events: none; }
   .midpt { fill: #f59e0b; stroke: #fff; stroke-width: 1.5; vector-effect: non-scaling-stroke; cursor: move; }
   .midpt.hot { fill: #b45309; stroke: #fff; stroke-width: 2; }
+  .meas-path { fill: none; stroke: #7c3aed; stroke-width: 3; stroke-linecap: round; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .meas-circle { fill: none; stroke: #7c3aed; stroke-width: 1.2; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .meas-dot { fill: #7c3aed; stroke: #fff; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .meas-text { font-size: 13px; font-weight: 700; fill: #7c3aed; paint-order: stroke; stroke: #fff; stroke-width: 4px; }
   .snap-guide { stroke: #ec4899; stroke-width: 1; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; pointer-events: none; }
   .snap-pt { fill: #ec4899; stroke: #fff; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
   .canvas-text { paint-order: stroke; stroke: #fff; stroke-width: 3px; dominant-baseline: middle; }
@@ -184,7 +189,6 @@
   .draft-line { fill: none; stroke: #2563eb; stroke-width: 2; vector-effect: non-scaling-stroke; }
   .handle-line { stroke: #f59e0b; stroke-width: 1; vector-effect: non-scaling-stroke; }
   .handle-dot { fill: #f59e0b; stroke: #fff; stroke-width: 1; vector-effect: non-scaling-stroke; cursor: grab; }
-  .draft-point { fill: #2563eb; }
   .start-marker { fill: none; stroke: #16a34a; stroke-width: 2; vector-effect: non-scaling-stroke; }
 
   /* right-click context menu */
@@ -267,8 +271,15 @@
       <label title="パーツ同士の角・辺に吸着"><input type="checkbox" id="chk-magnet" checked>🧲吸着</label>
     </span>
     <!-- 編集ツールの時だけ：接円弧 -->
-    <span class="ctx" id="ctx-edit">
+    <span class="ctx" id="ctx-meas">
       <span class="sep"></span>
+      <span id="meas-out">—</span>
+      <button id="btn-meas-label" title="測った値を図面に文字として入れる">図面に書き込む</button>
+      <button id="btn-meas-clear" title="測った結果を消す">やり直し</button>
+    </span>
+    <span class="ctx" id="ctx-point">
+      <span class="sep"></span>
+      <span id="point-mode-label" style="opacity:.85"></span>
       <button id="btn-mirror" class="toggle on" title="曲線の腕（ハンドル）を左右そろえて動かすか、片方ずつ動かすか。Altを押している間は一時的に逆になります">⇔ 腕を連動</button>
     </span>
     <span class="ctx" id="ctx-fillet">
@@ -391,6 +402,15 @@
   <div id="main">
     <div id="toolpanel">
       <button class="tool active" data-tool="select" id="tool-select" title="選択・編集 (V)"><span class="ic">⬚</span><span class="tl">選択</span></button>
+      <div class="tool-flyout-wrap">
+        <button class="tool" data-tool="__point" id="tool-point" title="ポイント（角・丸・中間）"><span class="ic" id="point-ic">◆</span><span class="tl">ポイント</span><span class="fly-tri">▸</span></button>
+        <div id="point-flyout" class="flyout">
+          <button class="tool" data-tool="pt-corner" id="tool-pt-corner" title="角ポイントを足す：辺の押した場所に、とがった点を足す"><span class="ic">◆</span><span class="tl">角を足す</span></button>
+          <button class="tool" data-tool="pt-smooth" id="tool-pt-smooth" title="丸ポイントを足す：辺の押した場所に、なめらかな点を足す（形は変わりません）"><span class="ic">◗</span><span class="tl">丸を足す</span></button>
+          <button class="tool" data-tool="pt-mid" id="tool-pt-mid" title="中間ポイント：選んだ点と点の間に、形を変えずに点を足す"><span class="ic">◇</span><span class="tl">中間</span></button>
+          <button class="tool" data-tool="pt-toggle" id="tool-pt-toggle" title="角 ↔ 丸 の切り替え：点をクリックすると入れ替わる"><span class="ic">⇆</span><span class="tl">切替</span></button>
+        </div>
+      </div>
       <span class="tp-sep"></span>
       <button class="tool" data-tool="draw" id="tool-draw" title="ペン (P)"><span class="ic">✏️</span><span class="tl">ペン</span></button>
       <div class="tool-flyout-wrap">
@@ -400,10 +420,17 @@
           <button class="tool" data-tool="ellipse" id="tool-ellipse" title="丸 (O)"><span class="ic">◯</span><span class="tl">丸</span></button>
         </div>
       </div>
+      <div class="tool-flyout-wrap">
+        <button class="tool" data-tool="__meas" id="tool-meas" title="計測（寸法線・周長・アール）"><span class="ic" id="meas-ic">📏</span><span class="tl">計測</span><span class="fly-tri">▸</span></button>
+        <div id="meas-flyout" class="flyout">
+          <button class="tool" data-tool="dim" id="tool-dim" title="寸法線 (D)：2点間の長さを図面に入れる"><span class="ic">📏</span><span class="tl">寸法線</span></button>
+          <button class="tool" data-tool="len" id="tool-len" title="周長：選んだ2点の間の輪郭の長さを測る"><span class="ic">〰</span><span class="tl">周長</span></button>
+          <button class="tool" data-tool="rad" id="tool-rad" title="アール：曲がり具合の半径を測る"><span class="ic">◜</span><span class="tl">アール</span></button>
+        </div>
+      </div>
       <button class="tool" data-tool="text" id="tool-text" title="文字 (T)"><span class="ic">T</span><span class="tl">文字</span></button>
       <button class="tool" data-tool="stitch" id="tool-stitch" title="ステッチ線 (S)"><span class="ic">🧵</span><span class="tl">ステッチ</span></button>
       <button class="tool" data-tool="zip" id="tool-zip" title="ファスナー (F)"><span class="ic">⛓</span><span class="tl">ファスナー</span></button>
-      <button class="tool" data-tool="dim" id="tool-dim" title="寸法線 (D)"><span class="ic">📏</span><span class="tl">寸法線</span></button>
       <button class="tool" data-tool="arrow" id="tool-arrow" title="矢印：地の目・引き出し線 (A)"><span class="ic">↗</span><span class="tl">矢印</span></button>
       <button class="tool" data-tool="notch" id="tool-notch" title="合印 (N)"><span class="ic">⊹</span><span class="tl">合印</span></button>
       <button class="tool" data-tool="fillet" id="tool-fillet" title="接円弧：角を丸める (C)"><span class="ic">⌒</span><span class="tl">接円弧</span></button>
@@ -442,8 +469,8 @@
         ・点をダブルクリック＝角↔曲線<br>
         ・Shift+クリック＝点を追加<br>
         ・<b>右クリック＝色の変更・複製・削除</b><br><br>
-        <b>画面を動かす</b>：<b>右ドラッグ</b>／<b>control を押しながら指を動かす</b><br>
-        （ホイールで拡大縮小）
+        <b>画面を動かす</b>：<b>指で撫でる・ホイール</b>／右ドラッグ<br>
+        <b>拡大縮小</b>：<b>ピンチ</b>（2本指でつまむ）
       </p>
       <div id="readout" title="カーソル位置と表示倍率"></div>
     </div>
@@ -560,7 +587,9 @@ function captureNotches(list){
   return out;
 }
 function makeSelMove(wp, list, textIds){
-  const ids = (textIds !== undefined) ? textIds : selTexts;
+  // textIds は必ず渡すこと。省くと「今選んでいる文字」が全部くっついてくる。
+  if (textIds === undefined) console.warn("makeSelMove: textIds を渡してください");
+  const ids = (textIds !== undefined) ? textIds : [];
   return { startW: wp,
     orig: list.map(m=>{ const nd=nodeOf(m); return { partId:m.partId, idx:m.idx, x:nd.x, y:nd.y }; }),
     origTexts: ids.map(id=>{ const t=project.texts.find(x=>x.id===id); return t?{id, x:t.x, y:t.y}:null; }).filter(Boolean),
@@ -797,13 +826,6 @@ function ungroupSelection(){
   if (!ids.length && !selTexts.length) return; pushUndo();
   for (const id of ids){ const p=project.parts.find(pp=>pp.id===id); if(p) p.group=null; }
   for (const tid of selTexts){ const t=project.texts.find(x=>x.id===tid); if(t) t.group=null; }
-  saveLocal(); render();
-}
-// Recolor every part referenced by the current selection (Affinity: select then set color).
-function recolorSelection(color){
-  const ids=[...new Set(multiSel.map(m=>m.partId))];
-  if (!ids.length) return; pushUndo();
-  for (const id of ids){ const p=project.parts.find(pp=>pp.id===id); if(p) p.color=color; }
   saveLocal(); render();
 }
 // ----- コピー＆ペースト（localStorage経由なので別の図面ファイルにも貼れる）-----
@@ -1089,12 +1111,6 @@ function offsetPolygon(nodes, d){
   return out;
 }
 
-function intersectLines(l1, l2){
-  const denom = l1.dx*l2.dy - l1.dy*l2.dx;
-  if (Math.abs(denom) < 1e-9) return null;
-  const t = ((l2.px - l1.px)*l2.dy - (l2.py - l1.py)*l2.dx) / denom;
-  return { x: l1.px + t*l1.dx, y: l1.py + t*l1.dy };
-}
 // Outward offset: grow polygon by `d` mm regardless of winding.
 function outwardOffset(nodes, d){
   const plus = offsetPolygon(nodes, d);
@@ -1275,6 +1291,211 @@ function nodesScreenPath(nodes, closed){
 }
 function partScreenPath(part){ return nodesScreenPath(part.nodes, part.closed); }
 // Insert a node onto the outline nearest to a world point (returns new index or -1).
+// 寸法線の描き方（寸法線ツールも、計測の書き込みも同じ形式）
+//   点A・点Bから引き出し線を立て、離れた位置に寸法線を渡して、真ん中に数値を置く。
+function drawDimension(frag, part){
+  const A = part.nodes[0], B = part.nodes[1];
+  if (!A || !B) return;
+  const col = part.color || "#111827";
+  let ux=B.x-A.x, uy=B.y-A.y; const L=Math.hypot(ux,uy)||1; ux/=L; uy/=L;
+  let px=-uy, py=ux;
+  let A2, B2, off;
+  if (part.maxis){
+    // 水平／垂直に固定した寸法線。2点の高さが違っても線はまっすぐ通す
+    if (part.maxis==="h"){ A2={x:A.x,y:part.mpos}; B2={x:B.x,y:part.mpos}; px=0; py=(part.mpos<A.y?-1:1); }
+    else                 { A2={x:part.mpos,y:A.y}; B2={x:part.mpos,y:B.y}; px=(part.mpos<A.x?-1:1); py=0; }
+    off = 1;
+  } else {
+    off = (part.moff===undefined) ? 25 : part.moff;   // 辺と平行に逃がす距離(mm)
+    A2 = { x:A.x+px*off, y:A.y+py*off }; B2 = { x:B.x+px*off, y:B.y+py*off };
+  }
+  const sa=worldToScreen(A2), sb=worldToScreen(B2);
+
+  // 引き出し線（点から寸法線まで。少しはみ出させる）
+  if (part.maxis){
+    const pair = [[A,A2],[B,B2]];
+    for (const [q,q2] of pair){
+      const e1 = worldToScreen({ x:q.x+px*2, y:q.y+py*2 });
+      const e2 = worldToScreen({ x:q2.x+px*4, y:q2.y+py*4 });
+      frag.appendChild(mk("line", { x1:e1.x, y1:e1.y, x2:e2.x, y2:e2.y, class:"dimext", stroke:col }));
+    }
+  } else if (Math.abs(off) > 0.01){
+    const ext = off + (off>0 ? 4 : -4);
+    for (const q of [A,B]){
+      const e1=worldToScreen({x:q.x+px*(off>0?2:-2), y:q.y+py*(off>0?2:-2)});
+      const e2=worldToScreen({x:q.x+px*ext, y:q.y+py*ext});
+      frag.appendChild(mk("line", { x1:e1.x, y1:e1.y, x2:e2.x, y2:e2.y, class:"dimext", stroke:col }));
+    }
+  }
+  // 寸法線と矢じり
+  frag.appendChild(mk("path", { d:`M${sa.x} ${sa.y} L${sb.x} ${sb.y}`, class:"dimline", stroke:col,
+    "data-part":part.id }));
+  if (part.mone){                                  // アールは片側だけ矢じり
+    addArrowHead(frag, sb, sa, col, 9);
+  } else {
+    addArrowHead(frag, sa, sb, col, 9);
+    addArrowHead(frag, sb, sa, col, 9);
+  }
+  // 数値。計測の書き込みは測った値のまま、寸法線ツールは2点間の長さを出す
+  const label = part.mlabel || (Math.round(L) + "mm");
+  const mid = { x:(A2.x+B2.x)/2, y:(A2.y+B2.y)/2 };
+  const sm = worldToScreen({ x:mid.x+px*3.5, y:mid.y+py*3.5 });
+  const t = mk("text", { x:sm.x, y:sm.y, class:"dimtext", fill:col, "text-anchor":"middle" });
+  t.textContent = label;
+  frag.appendChild(t);
+}
+
+// ===== 計測 =====
+// 測った結果。図面には残さず、画面に重ねて見せるだけ。
+let measure = null;   // {kind:"len"|"rad", partId, pts:[{x,y}], value, label, mid}
+function clearMeasure(){ measure = null; }
+// 図面に書き込んだ計測の数（寸法線として書いたもの＋古い文字のもの）
+function measCount(){
+  return project.parts.filter(p=>p.meas).length + project.texts.filter(t=>t.meas).length;
+}
+
+// 輪郭に沿った2点間の長さ（曲線は細かく分けて足す）。短い側・長い側の両方を返す。
+// 輪郭に沿った長さ。始点 → 経由点 → 終点 の順で、どちら回りかを経由点で決める。
+// 「短い方／反対まわり」という当てずっぽうが要らなくなる。
+function outlineLengthVia(part, i, via, j){
+  const fi = flattenNodesIndexed(part.nodes, part.closed, 64);
+  const pts = fi.pts, rng = fi.range;
+  const posOf = (k)=> k===0 ? 0 : rng[k-1].end;
+  const a = posOf(i), m = posOf(via), b = posOf(j);
+  const N = pts.length;
+
+  if (!part.closed){                      // 開いた線は回り道が無いので順に足すだけ
+    const lo=Math.min(a,b), hi=Math.max(a,b);
+    let s=0; for (let k=lo;k<hi;k++) s+=Math.hypot(pts[k+1].x-pts[k].x, pts[k+1].y-pts[k].y);
+    return { value:s, path: pts.slice(lo, hi+1) };
+  }
+  // 番号が増える向きに a→b と辿ったとき、途中で経由点 m を通るか
+  const passes = (from,to,mid)=>{
+    for (let k=from; k!==to; k=(k+1)%N) if (k===mid) return true;
+    return mid===to;
+  };
+  const forward = passes(a,b,m);
+  const step = forward ? 1 : -1;
+  const path=[]; let s=0;
+  for (let k=a; ; k=(k+step+N)%N){
+    path.push(pts[k]);
+    if (k===b) break;
+    const nx=(k+step+N)%N;
+    s += Math.hypot(pts[nx].x-pts[k].x, pts[nx].y-pts[k].y);
+  }
+  return { value:s, path };
+}
+
+// アール計測用の辺さがし。findAnyEdgeAt は閉じたパーツ限定（ステッチ用）なので、
+// こちらは開いた線（ペンで引いた線など）も対象にする。
+function findEdgeForRadius(sp){
+  let best = { d: Infinity, part: null, i: -1 };
+  for (const part of project.parts){
+    if (part.kind==="dim" || part.nodes.length < 2) continue;
+    const fi = flattenNodesIndexed(part.nodes, part.closed, 24);
+    const pts = fi.pts;
+    fi.range.forEach((rg, i)=>{
+      const end = (rg.end===0 && part.closed) ? pts.length : rg.end;
+      for (let k=rg.start; k<end; k++){
+        const a = worldToScreen(pts[k]), b = worldToScreen(pts[(k+1)%pts.length]);
+        const dx=b.x-a.x, dy=b.y-a.y, L2=dx*dx+dy*dy||1;
+        let t=((sp.x-a.x)*dx+(sp.y-a.y)*dy)/L2; t=Math.max(0,Math.min(1,t));
+        const d=Math.hypot(sp.x-(a.x+dx*t), sp.y-(a.y+dy*t));
+        if (d<best.d) best = { d, part, i };
+      }
+    });
+  }
+  return best.d < 14 ? best : null;
+}
+// 辺のどこを押したか（パーツ・辺の番号・辺の中での位置0〜1）を返す
+function findEdgeSpot(sp){
+  let best = { d: Infinity, part: null, i: -1, t: 0 };
+  for (const part of project.parts){
+    if (part.kind || part.nodes.length < 2) continue;      // 寸法線などは対象外
+    const steps = 24;
+    const fi = flattenNodesIndexed(part.nodes, part.closed, steps);
+    const pts = fi.pts;
+    fi.range.forEach((rg, i)=>{
+      const end = (rg.end===0 && part.closed) ? pts.length : rg.end;
+      const count = end - rg.start;
+      for (let k=rg.start; k<end; k++){
+        const a = worldToScreen(pts[k]), b = worldToScreen(pts[(k+1)%pts.length]);
+        const dx=b.x-a.x, dy=b.y-a.y, L2=dx*dx+dy*dy||1;
+        let u=((sp.x-a.x)*dx+(sp.y-a.y)*dy)/L2; u=Math.max(0,Math.min(1,u));
+        const d=Math.hypot(sp.x-(a.x+dx*u), sp.y-(a.y+dy*u));
+        if (d<best.d) best = { d, part, i, t: (k-rg.start+u)/count };
+      }
+    });
+  }
+  return best.d < 14 ? best : null;
+}
+// 3点を通る円の半径と中心（アールの計測）
+function circleFrom3(p1,p2,p3){
+  const ax=p1.x, ay=p1.y, bx=p2.x, by=p2.y, cx=p3.x, cy=p3.y;
+  const d = 2*(ax*(by-cy) + bx*(cy-ay) + cx*(ay-by));
+  if (Math.abs(d) < 1e-9) return null;                 // 3点が一直線＝円にならない
+  const ux = ((ax*ax+ay*ay)*(by-cy) + (bx*bx+by*by)*(cy-ay) + (cx*cx+cy*cy)*(ay-by))/d;
+  const uy = ((ax*ax+ay*ay)*(cx-bx) + (bx*bx+by*by)*(ax-cx) + (cx*cx+cy*cy)*(bx-ax))/d;
+  return { c:{x:ux,y:uy}, r: Math.hypot(ax-ux, ay-uy) };
+}
+// 辺の曲がり具合の半径。辺を細かく分けて、中ほどの3点から円を求める
+function radiusOfSegment(part, i){
+  const sc = segControls(part.nodes, i, part.closed);
+  if (sc.straight) return { straight:true };
+  const at = (t)=>bezierAt(sc, t);
+  const cir = circleFrom3(at(0.25), at(0.5), at(0.75));
+  if (!cir) return { straight:true };
+  return { straight:false, r:cir.r, c:cir.c, mid:at(0.5), a:at(0), b:at(1) };
+}
+function fmtMM(v){ return (v>=100 ? Math.round(v) : v.toFixed(1)) + "mm"; }
+
+// 中間ポイント：2点の間に、形をまったく変えずに点を足す。
+// 曲線は「ド・カステリョ分割」で2本に割る。割った2本を繋ぐと元の曲線と完全に一致する。
+function insertMidNode(part, i){ return insertNodeOnSegment(part, i, 0.5); }
+// 辺の途中（0〜1の位置）に、形を変えずに点を足す
+function insertNodeOnSegment(part, i, t){
+  const nodes = part.nodes, n = nodes.length;
+  const j = (i+1) % n;
+  if (j===0 && !part.closed) return false;          // 開いた線の終端の先は無い
+  const sc = segControls(nodes, i, part.closed);
+  const A = nodes[i], B = nodes[j];
+  if (sc.straight){                                  // 直線はその位置に足すだけ
+    nodes.splice(i+1, 0, { x:A.x+(B.x-A.x)*t, y:A.y+(B.y-A.y)*t, hIn:null, hOut:null });
+    return true;
+  }
+  const L = (p,q,u)=>({ x:p.x+(q.x-p.x)*u, y:p.y+(q.y-p.y)*u });
+  const P0={x:A.x,y:A.y}, P1=sc.c1, P2=sc.c2, P3={x:B.x,y:B.y};
+  const Q0=L(P0,P1,t), Q1=L(P1,P2,t), Q2=L(P2,P3,t);
+  const R0=L(Q0,Q1,t), R1=L(Q1,Q2,t);
+  const S =L(R0,R1,t);                               // ここが新しい点
+  A.hOut = { x:Q0.x-A.x, y:Q0.y-A.y };
+  B.hIn  = { x:Q2.x-B.x, y:Q2.y-B.y };
+  nodes.splice(i+1, 0, { x:S.x, y:S.y,
+    hIn:{ x:R0.x-S.x, y:R0.y-S.y }, hOut:{ x:R1.x-S.x, y:R1.y-S.y } });
+  return true;
+}
+// 選んである点のうち、隣り合う組の間に中間ポイントを入れる
+function insertMidForSelection(){
+  const byPart = {};
+  for (const m of multiSel) (byPart[m.partId] = byPart[m.partId] || []).push(m.idx);
+  let added = 0;
+  for (const pid in byPart){
+    const p = project.parts.find(x=>x.id===pid);
+    if (!p) continue;
+    const n = p.nodes.length;
+    const set = new Set(byPart[pid]);
+    const pairs = [];
+    for (const i of byPart[pid]){
+      const j = (i+1) % n;
+      if (!set.has(j)) continue;
+      if (j===0 && !p.closed) continue;
+      pairs.push(i);
+    }
+    // 番号の大きい方から入れる（前に入れると後ろの番号がずれるため）
+    pairs.sort((a,b)=>b-a).forEach(i=>{ if (insertMidNode(p, i)) added++; });
+  }
+  return added;
+}
 function insertNodeAt(part, wp){
   const nodes = part.nodes, closed = part.closed, n = nodes.length;
   const segCount = closed ? n : n-1;
@@ -1338,6 +1559,12 @@ const MODE_INFO = {
   dim:     { icon:"📏", name:"寸法線モード" },
   select:  { icon:"⬚",  name:"選択・編集モード" },
   notch:   { icon:"⊹",  name:"合印モード" },
+  "pt-corner": { icon:"◆", name:"角ポイントを足す" },
+  "pt-smooth": { icon:"◗", name:"丸ポイントを足す" },
+  "pt-mid":    { icon:"◇", name:"中間ポイント" },
+  "pt-toggle": { icon:"⇆", name:"角↔丸 の切り替え" },
+  len:     { icon:"〰", name:"周長の計測" },
+  rad:     { icon:"◜", name:"アールの計測" },
   fillet:  { icon:"⌒",  name:"接円弧モード" }
 };
 function updateModeBadge(){
@@ -1349,7 +1576,26 @@ function updateModeBadge(){
 }
 function updateContextBar(){
   document.getElementById("ctx-common").classList.add("show");
-  document.getElementById("ctx-edit").classList.toggle("show", tool==="select");
+  document.getElementById("ctx-meas").classList.toggle("show", isMeasTool());
+  if (isMeasTool()){
+    document.getElementById("meas-out").textContent = measure ? measure.label
+      : (tool==="len"
+          ? (multiSel.length===0 ? "① 測りはじめの点をクリック"
+           : multiSel.length===1 ? "② 通り道の点をクリック（まわる向きが決まります）"
+           : "③ 終わりの点をクリック")
+          : "曲がった辺をクリックしてください");
+    const lb = document.getElementById("btn-meas-label");
+    lb.disabled = !measure || measure.straight;
+    lb.textContent = (measure && measure.textId) ? "書き込みを消す" : "図面に書き込む";
+  }
+  document.getElementById("ctx-point").classList.toggle("show", isPointTool());
+  if (isPointTool()){
+    document.getElementById("point-mode-label").textContent =
+      tool==="pt-corner" ? "◆ 辺をクリックすると角の点を足します"
+    : tool==="pt-smooth" ? "◗ 辺をクリックすると丸い点を足します"
+    : tool==="pt-toggle" ? "⇆ 点をクリックすると 角↔丸 が入れ替わります"
+    : (multiSel.length ? "◇ もう1つ、となりの点を選ぶ" : "◇ 点を2つ選ぶと間に足します");
+  }
   document.getElementById("ctx-fillet").classList.toggle("show", tool==="fillet");
   if (tool==="fillet"){
     const n = filletBase ? filletBase.sel.length : multiSel.length;   // 調整中はその対象数を出す
@@ -1441,6 +1687,28 @@ function renderShapePreview(){
   const t=mk("text", { x:mid.x, y:mid.y, class:"edge-len", "text-anchor":"middle", "dominant-baseline":"middle" });
   t.textContent = `${wmm}×${hmm}`; gDraft.appendChild(t);
 }
+// 計測の結果を画面に重ねて見せる（図面データには残らない）
+function renderMeasure(){
+  if (!measure || measure.straight) return;
+  const frag = document.createDocumentFragment();
+  if (measure.kind==="len" && measure.path && measure.path.length>1){
+    const d = "M" + measure.path.map(q=>{ const s=worldToScreen(q); return s.x+" "+s.y; }).join(" L");
+    frag.appendChild(mk("path", { d, class:"meas-path" }));
+    const m = measure.path[Math.floor(measure.path.length/2)];
+    const s = worldToScreen(m);
+    const t = mk("text", { x:s.x, y:s.y-12, class:"meas-text", "text-anchor":"middle" });
+    t.textContent = measure.label; frag.appendChild(t);
+  }
+  if (measure.kind==="rad" && measure.c){
+    const c = worldToScreen(measure.c), mid = worldToScreen(measure.mid);
+    frag.appendChild(mk("circle", { cx:c.x, cy:c.y, r: measure.r*view.scale, class:"meas-circle" }));
+    frag.appendChild(mk("line", { x1:c.x, y1:c.y, x2:mid.x, y2:mid.y, class:"meas-path" }));
+    frag.appendChild(mk("circle", { cx:c.x, cy:c.y, r:3.5, class:"meas-dot" }));
+    const t = mk("text", { x:(c.x+mid.x)/2, y:(c.y+mid.y)/2-8, class:"meas-text", "text-anchor":"middle" });
+    t.textContent = measure.label; frag.appendChild(t);
+  }
+  gHandles.appendChild(frag);
+}
 function renderSnapGuides(){
   if (!snapGuides.length) return;
   const w=vpW, h=vpH;
@@ -1457,6 +1725,7 @@ function render(){
   renderDraft();       // ends by calling renderHandles() (clears gHandles)
   renderShapePreview();// rectangle/ellipse preview
   renderSelection();   // appends the 選択-tool overlay onto gHandles
+  renderMeasure();     // 計測の重ね表示
   renderSnapGuides();  // magnet guide lines/points
   // the parts list can't change mid-drag - skip the DOM rebuild for smoothness
   if (!suppressListRender && !selMove && !handleDrag && !penDrag && !textDrag && !marquee && !shapeDrag && !drag) renderPartList();
@@ -1470,13 +1739,13 @@ function render(){
 
 // Overlay for the 選択 tool: every anchor as a small square (selected ones highlighted) + marquee box.
 function renderSelection(){
-  if (tool!=="select" && tool!=="fillet") return;   // 接円弧でも角を見せる
+  if (tool!=="select" && tool!=="fillet" && !isPointTool() && tool!=="len") return;   // 接円弧・ポイント・周長でも点を見せる
   const frag = document.createDocumentFragment();
   // only show anchors for the selection (or every anchor while rubber-band selecting)
   const selIds = new Set(multiSel.map(m=>m.partId));
   if (selectedPartId) selIds.add(selectedPartId);
   for (const part of project.parts){
-    if (!marquee && tool!=="fillet" && !selIds.has(part.id)) continue;
+    if (!marquee && tool!=="fillet" && !isPointTool() && tool!=="len" && !selIds.has(part.id)) continue;
     part.nodes.forEach((nd,i)=>{
       const s = worldToScreen(nd);
       const on = multiSel.some(m=>m.partId===part.id && m.idx===i);
@@ -1584,25 +1853,9 @@ function renderParts(){
       drawZip(frag, part);
       continue;
     }
-    if (part.kind==="dim"){
-      const A=part.nodes[0], B=part.nodes[1];
-      const sa=worldToScreen(A), sb=worldToScreen(B);
-      frag.appendChild(mk("path", { d:`M${sa.x} ${sa.y} L${sb.x} ${sb.y}`, class:"dimline", stroke:part.color,
-        "data-part":part.id }));
-      addArrowHead(frag, sa, sb, part.color, 9);   // 両端に外向きの矢じり
-      addArrowHead(frag, sb, sa, part.color, 9);
-      // short perpendicular ticks at each end
-      let ux=B.x-A.x, uy=B.y-A.y; const L=Math.hypot(ux,uy)||1; ux/=L; uy/=L;
-      const px=-uy, py=ux, t=5;
-      for (const [q,ss] of [[A,sa],[B,sb]]){
-        const p1=worldToScreen({x:q.x+px*t, y:q.y+py*t}), p2=worldToScreen({x:q.x-px*t, y:q.y-py*t});
-        frag.appendChild(mk("line", { x1:p1.x, y1:p1.y, x2:p2.x, y2:p2.y, class:"dimtick", stroke:part.color }));
-      }
-      const mid={x:(sa.x+sb.x)/2, y:(sa.y+sb.y)/2};
-      const off=worldToScreen({x:(A.x+B.x)/2+px*7, y:(A.y+B.y)/2+py*7});
-      const lbl=mk("text", { x:off.x, y:off.y, class:"dimtext", fill:part.color, "text-anchor":"middle" });
-      lbl.textContent = Math.round(L) + "mm";
-      frag.appendChild(lbl);
+    // 寸法線／計測の書き込み：両端に引き出し線を立て、その先に寸法線を渡す
+    if (part.kind==="dim" || part.kind==="mdim"){
+      drawDimension(frag, part);
       continue;
     }
     // arrow: an open path with an arrowhead (grain direction / leader line)
@@ -1799,6 +2052,16 @@ function updateHint(){
       : " ・ パーツ/文字をクリックで選択（文字はダブルクリックで編集）・ 空きをドラッグで囲んで選択";
   } else if (tool==="notch"){
     msg += " ・ 輪郭付近をクリックで合印を追加 / 右クリックで削除";
+  } else if (tool==="len"){
+    msg += " ・ ①始点 → ②通り道 → ③終点 の順にクリック（曲線に沿って測ります）";
+  } else if (tool==="rad"){
+    msg += " ・ 曲がった辺をクリック＝その丸みの半径（R）";
+  } else if (isPointTool()){
+    msg += tool==="pt-mid"
+      ? " ・ となり合う点を2つクリック（囲んで複数も可）＝形を変えずに間に点を足す"
+    : tool==="pt-toggle"
+      ? " ・ 点をクリック＝角 ↔ 丸 を入れ替える"
+      : " ・ 辺の足したい場所をクリック＝" + (tool==="pt-corner" ? "角の点を足す" : "丸い点を足す（形は変わりません）");
   } else if (tool==="fillet"){
     msg += " ・ 角をクリック（ドラッグで囲む＝複数 / Shift+クリックで足し引き）→ 上の半径で丸める";
   }
@@ -1862,7 +2125,7 @@ function drawZip(frag, part){
     frag.appendChild(mk("line", { x1:a.x, y1:a.y, x2:b.x, y2:b.y, class:"ziptooth", stroke:col }));
   }
   // スライダー本体（先が細い形）と引き手。外側へ向けて置く
-  const bodyL = atLeast(12, 26), bodyW = atLeast(7, 15);
+  const bodyL = atLeast(8.5, 18), bodyW = atLeast(5, 10.5);   // スライダー本体
   const atEnd = (part.zipEnd !== 0);
   if (total < bodyL*0.6) return;                     // 短すぎる線には付けない
   const d0 = atEnd ? Math.max(0, total - bodyL/2) : Math.min(total, bodyL/2);
@@ -1875,7 +2138,7 @@ function drawZip(frag, part){
   frag.appendChild(mk("path", {
     d: poly([P(-bodyL/2,0), P(-bodyL/6,bodyW/2), P(bodyL/2,bodyW/2), P(bodyL/2,-bodyW/2), P(-bodyL/6,-bodyW/2)]),
     class:"zipslider", fill:col, stroke:col, "data-part":part.id }));
-  const stem = bodyL*0.25, tabL = bodyL*0.5, tabW = bodyW*0.34;
+  const stem = bodyL*0.25, tabL = bodyL*0.42, tabW = bodyW*0.26;   // 引き手（手で持つ部分）
   const s1 = P(bodyL/2,0), s2 = P(bodyL/2+stem,0);
   frag.appendChild(mk("line", { x1:s1.x, y1:s1.y, x2:s2.x, y2:s2.y, class:"zipstem", stroke:col }));
   frag.appendChild(mk("path", {
@@ -1919,23 +2182,6 @@ function duplicatePart(part, dx, dy){
   project.parts.push(copy);
   selectedPartId = copy.id;
   return copy;
-}
-// Rotate a part in place by `deg` degrees around its centroid (rotates handles + notches too).
-function rotatePart(part, deg){
-  const rad = deg*Math.PI/180, cos = Math.cos(rad), sin = Math.sin(rad);
-  const c = centroid(part.nodes);
-  const rot = (p)=>({ x: c.x + (p.x-c.x)*cos - (p.y-c.y)*sin, y: c.y + (p.x-c.x)*sin + (p.y-c.y)*cos });
-  const rotOff = (o)=> o ? { x: o.x*cos - o.y*sin, y: o.x*sin + o.y*cos } : null;
-  part.nodes = part.nodes.map(nd => { const p = rot(nd); return { x:p.x, y:p.y, hIn:rotOff(nd.hIn), hOut:rotOff(nd.hOut) }; });
-  if (part.notches) part.notches = part.notches.map(rot);
-}
-// Flip a part in place. axis: "h" = left-right (mirror X), "v" = up-down (mirror Y).
-function flipPart(part, axis){
-  const c = centroid(part.nodes);
-  const flip = (p)=> axis==="h" ? { x: 2*c.x - p.x, y: p.y } : { x: p.x, y: 2*c.y - p.y };
-  const flipOff = (o)=> o ? (axis==="h" ? { x:-o.x, y:o.y } : { x:o.x, y:-o.y }) : null;
-  part.nodes = part.nodes.map(nd => { const p = flip(nd); return { x:p.x, y:p.y, hIn:flipOff(nd.hIn), hOut:flipOff(nd.hOut) }; });
-  if (part.notches) part.notches = part.notches.map(flip);
 }
 // Round a corner node with a tangent circular arc (fillet) of the given radius.
 function filletNode(part, idx, radius){
@@ -2040,7 +2286,8 @@ function setTool(t){
   if (typeof filletReset==="function") filletReset();
   tool = t;
   // 接円弧は「選んだ点に効かせる」ツールなので、選択ツールからの点の選択を引き継ぐ
-  if (t!=="select" && t!=="fillet"){ multiSel = []; marquee = null; selMove = null; }
+  if (t!=="select" && t!=="fillet" && t.indexOf("pt-")!==0 && t!=="len"){ multiSel = []; marquee = null; selMove = null; }
+  if (t!=="len" && t!=="rad") clearMeasure();
   if (t!=="select" && t!=="text") selTexts = [];
   document.querySelectorAll("button.tool").forEach(b=>b.classList.toggle("active", b.dataset.tool===t));
   // the 図形 (shape) button stands in for rect/ellipse
@@ -2049,6 +2296,19 @@ function setTool(t){
     const isShape = (t==="rect" || t==="ellipse");
     shapeBtn.classList.toggle("active", isShape);
     if (isShape) document.getElementById("shape-ic").textContent = (t==="rect") ? "▭" : "◯";
+  }
+  const measBtn = document.getElementById("tool-meas");
+  if (measBtn){
+    const isM = (t==="dim" || t==="len" || t==="rad");
+    measBtn.classList.toggle("active", isM);
+    if (isM) document.getElementById("meas-ic").textContent = t==="dim" ? "📏" : t==="len" ? "〰" : "◜";
+  }
+  const pointBtn = document.getElementById("tool-point");
+  if (pointBtn){
+    const isPt = (t.indexOf("pt-")===0);
+    pointBtn.classList.toggle("active", isPt);
+    if (isPt) document.getElementById("point-ic").textContent =
+      t==="pt-corner" ? "◆" : t==="pt-smooth" ? "◗" : t==="pt-toggle" ? "⇆" : "◇";
   }
   render();
 }
@@ -2181,8 +2441,9 @@ svg.addEventListener("mousedown", (e)=>{
       // 複数点を囲んで選んでいた場合だけ、その一団をまとめて動かす
       const inPointSel = (selMode==="points") && multiSel.some(m=>m.partId===v.part.id && m.idx===v.idx) && multiSel.length>1;
       selMode = "points";
-      // 点を1つつかんだ時は文字を連れて行かない。囲んで選んだ一団を動かす時だけ文字も一緒。
-      if (inPointSel) startMove(multiSel);
+      // 点をつかむ操作では文字を連れて行かない（1つでも、囲んだ一団でも同じ）。
+      // 文字ごと動かしたい時は、点ではなくパーツの面か文字そのものをつかむ。
+      if (inPointSel) startMove(multiSel, []);
       else            startMove([{ partId:v.part.id, idx:v.idx }], []);
       render(); return;
     }
@@ -2211,7 +2472,7 @@ svg.addEventListener("mousedown", (e)=>{
       const spanning = multiSel.length>0 || selTexts.length>1;
       if (inSel && spanning){
         selectedPartId = selectedPartId || null; selVertex = null;
-        selMove = makeSelMove(wp, multiSel);
+        selMove = makeSelMove(wp, multiSel, selTexts.slice());   // 選択中の文字ごと動かす
         render(); return;
       }
       // グループに属する文字なら、そのグループごと選ぶ
@@ -2220,7 +2481,7 @@ svg.addEventListener("mousedown", (e)=>{
         const gt = project.texts.filter(t=>t.group===ht.group).map(t=>t.id);
         multiSel = []; gp.forEach(p=>p.nodes.forEach((_,i)=>multiSel.push({partId:p.id, idx:i})));
         selTexts = gt; selectedPartId = gp.length?gp[0].id:null; selVertex = null; selMode = "part";
-        selMove = makeSelMove(wp, multiSel);
+        selMove = makeSelMove(wp, multiSel, gt);                 // グループの文字だけ動かす
         render(); return;
       }
       selTexts = [ht.id]; selectedPartId = null; multiSel = []; selVertex = null;
@@ -2238,7 +2499,8 @@ svg.addEventListener("mousedown", (e)=>{
       const spanning = new Set(multiSel.map(m=>m.partId)).size > 1 || selTexts.length > 0;
       if (inSel && spanning){
         selectedPartId = part.id; selVertex = null;
-        startMove(withRiders(multiSel));      // 上に乗っている線も連れて行く
+        // 選択ごと動かす場面なので、選んである文字も一緒に運ぶ（省略せず明示する）
+        startMove(withRiders(multiSel), selTexts.slice());
         render(); return;
       }
       selectedPartId = part.id; selVertex = null; selMode = "part";
@@ -2251,6 +2513,94 @@ svg.addEventListener("mousedown", (e)=>{
       render(); return;
     }
     // 7) 空き：範囲選択
+    multiSel = []; selectedPartId = null; selVertex = null; selMode = "points"; selTexts = [];
+    marquee = { x0:sp.x, y0:sp.y, x1:sp.x, y1:sp.y };
+    render(); return;
+  }
+  // 周長：2点を選ぶと、その間の輪郭に沿った長さを測る
+  if (tool==="len"){
+    const v = findVertexAt(sp);
+    if (!v){ multiSel=[]; clearMeasure(); render(); return; }
+    // 1つ目=始点、2つ目=通り道（どちら回りかを決める）、3つ目=終点
+    if (multiSel.length>=3 || (multiSel.length && multiSel[0].partId!==v.part.id)){
+      multiSel=[]; clearMeasure();
+    }
+    multiSel.push({ partId:v.part.id, idx:v.idx });
+    selectedPartId = v.part.id; selMode="points";
+    if (multiSel.length===3){
+      const r = outlineLengthVia(v.part, multiSel[0].idx, multiSel[1].idx, multiSel[2].idx);
+      measure = { kind:"len", partId:v.part.id, value:r.value, path:r.path, label: fmtMM(r.value) };
+    } else clearMeasure();
+    render(); return;
+  }
+  // アール：辺をクリックすると、その曲がり具合の半径を測る
+  if (tool==="rad"){
+    const eg = findEdgeForRadius(sp);
+    if (!eg){ clearMeasure(); multiSel=[]; render(); return; }
+    const r = radiusOfSegment(eg.part, eg.i);
+    if (r.straight){ measure = { kind:"rad", straight:true, label:"この辺はまっすぐです（アールなし）" }; }
+    else measure = { kind:"rad", partId:eg.part.id, r:r.r, c:r.c, mid:r.mid, a:r.a, b:r.b,
+                     value:r.r, label:"R "+fmtMM(r.r) };
+    selectedPartId = eg.part.id;
+    render(); return;
+  }
+  // ポイントツール
+  if (tool==="pt-corner" || tool==="pt-smooth" || tool==="pt-mid" || tool==="pt-toggle"){
+    const v = findVertexAt(sp);
+    // 角／丸を「足す」：辺の押した場所に、形を変えずに点を足す
+    if ((tool==="pt-corner" || tool==="pt-smooth") && !v){
+      const eg = findEdgeSpot(sp);
+      if (eg){
+        pushUndo();
+        if (insertNodeOnSegment(eg.part, eg.i, eg.t)){
+          const idx = eg.i + 1;
+          const nd = eg.part.nodes[idx];
+          if (tool==="pt-corner"){ nd.hIn = null; nd.hOut = null; }   // 角にする
+          selectedPartId = eg.part.id; selVertex = { partId:eg.part.id, idx };
+          saveLocal();
+        }
+        render(); return;
+      }
+      multiSel=[]; selectedPartId=null; selVertex=null; render(); return;
+    }
+    if (v){
+      if (tool==="pt-corner" || tool==="pt-smooth"){
+        // 点の上を押したときは、その点をその形に変える（足す場所が無いため）
+        pushUndo();
+        const nd = v.part.nodes[v.idx];
+        if (tool==="pt-corner"){ nd.hIn = null; nd.hOut = null; }
+        else { const t = autoHandle(v.part.nodes, v.idx, v.part.closed);
+               nd.hOut = { x:t.x, y:t.y }; nd.hIn = { x:-t.x, y:-t.y }; }
+        selectedPartId = v.part.id; selVertex = { partId:v.part.id, idx:v.idx };
+        saveLocal(); render(); return;
+      }
+      if (tool==="pt-toggle"){
+        // 角 ↔ 丸 を切り替える
+        pushUndo();
+        toggleNodeSmooth(v.part.nodes, v.idx, v.part.closed);
+        selectedPartId = v.part.id; selVertex = { partId:v.part.id, idx:v.idx };
+        saveLocal(); render(); return;
+      }
+      if (tool==="pt-mid"){
+        // 2点を選ぶ → その間に足す。Shift不要で、続けてクリックしていける
+        const at = multiSel.findIndex(m=>m.partId===v.part.id && m.idx===v.idx);
+        if (at>=0) multiSel.splice(at,1);
+        else {
+          if (multiSel.length && multiSel[0].partId!==v.part.id) multiSel = [];   // 別パーツなら選び直し
+          multiSel.push({ partId:v.part.id, idx:v.idx });
+        }
+        selectedPartId = v.part.id; selMode = "points";
+        if (multiSel.length >= 2){
+          pushUndo();
+          const added = insertMidForSelection();
+          multiSel = []; selVertex = null;                 // 番号がずれるので選び直し
+          if (!added) alert("となり合った2つの点を選んでください。");
+          saveLocal();
+        }
+        render(); return;
+      }
+    }
+    // 点以外を押したら選び直し（囲んで複数選ぶのにも使う）
     multiSel = []; selectedPartId = null; selVertex = null; selMode = "points"; selTexts = [];
     marquee = { x0:sp.x, y0:sp.y, x1:sp.x, y1:sp.y };
     render(); return;
@@ -2453,6 +2803,11 @@ window.addEventListener("mouseup", (e)=>{
     }
     shapeDrag = null;
   }
+  // 中間ポイント：囲んで選び終えた時点で、隣り合う点の間に足す
+  if (tool==="pt-mid" && marquee){
+    marquee = null;
+    if (multiSel.length >= 2){ pushUndo(); insertMidForSelection(); multiSel = []; saveLocal(); }
+  }
   // 接円弧：囲んで選び終えた時点で、今の半径を当てる
   if (tool==="fillet" && marquee){ marquee = null; filletApplyToSelection(); }
   // 形を変えた後は合印を輪郭の上に貼り直す（ずれたままだと消せなくなる）
@@ -2556,6 +2911,7 @@ function showFileMenu(x, y){
     <label class="cm-row cm-check"><input type="checkbox" id="cm-dim"${dimOn?" checked":""}> 寸法を表示</label>
     <div class="cm-sep"></div>
     <button data-cmd="new">📄 新規作成</button>
+    ${measCount() ? `<button data-cmd="clearmeas">📐 計測の書き込みを全部消す（${measCount()}個）</button>` : ""}
     <div class="cm-sep"></div>
     <button data-cmd="fit">🔎 全体表示</button>
     <button data-cmd="save">💾 保存</button>
@@ -2567,7 +2923,7 @@ function showObjectMenu(x, y, part, text){
   ctxTarget = text ? { text } : { part };
   const cur = text ? (text.color||"#111827") : (part.color||"#2563eb");
   const label = text ? `「${(text.text||"文字").slice(0,10)}」`
-                     : (part.kind==="stitch" ? "🧵 ステッチ線" : part.kind==="zip" ? "⛓ ファスナー" : part.kind==="arrow" ? "↗ 矢印"
+                     : (part.kind==="stitch" ? "🧵 ステッチ線" : part.kind==="zip" ? "⛓ ファスナー" : part.kind==="mdim" ? "📐 計測の書き込み" : part.kind==="dim" ? "📏 寸法線" : part.kind==="arrow" ? "↗ 矢印"
                         : (part.name && part.name.trim() ? "▭ "+part.name : "▭ パーツ"));
   const m = document.getElementById("context-menu");
   m.innerHTML = `
@@ -2582,11 +2938,14 @@ function showObjectMenu(x, y, part, text){
       <div class="cm-row">歯の間隔
         <input type="number" id="cm-zip-pitch" value="${part.zipPitch||3}" min="1" max="20" step="0.5">mm
       </div>` : ""}
+    ${measCount()>0 && ((text && text.meas) || (part && part.meas))
+        ? `<button data-cmd="delmeasone">📐 この計測の書き込みを消す</button>` : ""}
+    ${measCount()>1 && ((text && text.meas) || (part && part.meas))
+        ? `<button data-cmd="clearmeas">📐 計測の書き込みを全部消す（${measCount()}個）</button>` : ""}
     ${part ? `<button data-cmd="dupobj">複製</button>` : ""}
     <button data-cmd="delobj">🗑 削除</button>`;
   placeMenu(m, x, y);
 }
-function showContextMenu(x, y){ showFileMenu(x, y); }
 function hideContextMenu(){ document.getElementById("context-menu").classList.remove("show"); }
 document.getElementById("context-menu").addEventListener("click", (e)=>{
   // colour chip inside the object menu
@@ -2605,7 +2964,26 @@ document.getElementById("context-menu").addEventListener("click", (e)=>{
   if (e.target.closest && e.target.closest(".cm-check")) return;
   const cmd = e.target.dataset.cmd; if (!cmd) return;
   hideContextMenu();
-  if (cmd==="new") newProject();
+  if (cmd==="delmeasone" && ctxTarget){
+    pushUndo();
+    const id = ctxTarget.text ? ctxTarget.text.id : ctxTarget.part.id;
+    project.texts = project.texts.filter(t=>t.id!==id);
+    project.parts = project.parts.filter(p=>p.id!==id);
+    if (measure && measure.textId===id) measure.textId = null;
+    selectedPartId=null; multiSel=[]; saveLocal(); render();
+  }
+  else if (cmd==="clearmeas"){
+    // 件数はメニューに出してあり、⌘Zで戻せるので確認ダイアログは挟まない
+    // （埋め込み環境では confirm が自動でキャンセルされ、効かないことがある）
+    if (measCount()){
+      pushUndo();
+      project.texts = project.texts.filter(t=>!t.meas);
+      project.parts = project.parts.filter(p=>!p.meas);
+      if (measure) measure.textId = null;
+      selectedPartId=null; multiSel=[]; saveLocal(); render();
+    }
+  }
+  else if (cmd==="new") newProject();
   else if (cmd==="fit") fitView();
   else if (cmd==="save") document.getElementById("btn-save").click();
   else if (cmd==="load") document.getElementById("btn-load").click();
@@ -2638,15 +3016,36 @@ document.getElementById("context-menu").addEventListener("click", (e)=>{
 });
 
 // zoom with wheel (centered on cursor)
+// ホイール操作。Macの作法に合わせて2通りに分ける。
+//  ・ピンチ（つまむ）        → 拡大縮小。ブラウザは ctrlKey 付きで送ってくる
+//  ・撫でる／普通のホイール  → 画面移動。マウスのホイールは縦、Shift併用や横スワイプで横へ
+// 拡大縮小は「動いた量」に比例させる。向きだけで一律1.1倍にすると、
+// トラックパッドやMagic Mouseは1回の操作で数十イベント飛ぶため、一気に十数倍に跳ねてしまう。
+const ZOOM_PER_UNIT = 0.00095;  // マウスの1カチッ（約100）で 1.10 倍＝今までと同じ感触
+const PAN_GAIN = 1.0;           // 撫でたぶんの画面移動量
+function wheelDelta(e){
+  // deltaMode: 0=ピクセル 1=行 2=ページ。行やページ単位なら概算でピクセルに直す
+  const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? (vpH || 800) : 1;
+  return { x: e.deltaX * k, y: e.deltaY * k };
+}
 svg.addEventListener("wheel", (e)=>{
   e.preventDefault();
+  const d = wheelDelta(e);
   const sp = svgPoint(e);
-  const before = screenToWorld(sp.x, sp.y);
-  const factor = e.deltaY < 0 ? 1.1 : 1/1.1;
-  view.scale = clampScale(view.scale*factor);
-  const after = screenToWorld(sp.x, sp.y);
-  view.tx += (after.x - before.x)*view.scale;
-  view.ty += (after.y - before.y)*view.scale;
+
+  if (e.ctrlKey){                          // ピンチ＝拡大縮小
+    const before = screenToWorld(sp.x, sp.y);
+    view.scale = clampScale(view.scale * Math.exp(-d.y * ZOOM_PER_UNIT));
+    const after = screenToWorld(sp.x, sp.y);
+    view.tx += (after.x - before.x) * view.scale;
+    view.ty += (after.y - before.y) * view.scale;
+  } else {                                 // 撫でる／ホイール＝画面移動
+    // Shift+ホイールは横スクロール（マウスには横方向が無いため）
+    const dx = (e.shiftKey && !d.x) ? d.y : d.x;
+    const dy = (e.shiftKey && !d.x) ? 0   : d.y;
+    view.tx -= dx * PAN_GAIN;
+    view.ty -= dy * PAN_GAIN;
+  }
   renderThrottled();
 }, { passive: false });
 
@@ -2761,9 +3160,17 @@ document.getElementById("part-list").addEventListener("input", (e)=>{
 // ===== Toolbar buttons =====
 const shapeFlyout = document.getElementById("shape-flyout");
 function hideShapeFlyout(){ shapeFlyout.classList.remove("show"); }
+const pointFlyout = document.getElementById("point-flyout");
+function hidePointFlyout(){ pointFlyout.classList.remove("show"); }
+const measFlyout = document.getElementById("meas-flyout");
+function hideMeasFlyout(){ measFlyout.classList.remove("show"); }
+function isPointTool(){ return tool.indexOf("pt-")===0; }
+function isMeasTool(){ return tool==="len" || tool==="rad"; }
 document.querySelectorAll("button.tool").forEach(b=> b.addEventListener("click", (e)=>{
-  if (b.dataset.tool==="__shape"){ e.stopPropagation(); shapeFlyout.classList.toggle("show"); return; }
-  setTool(b.dataset.tool); hideShapeFlyout();
+  if (b.dataset.tool==="__shape"){ e.stopPropagation(); hidePointFlyout(); shapeFlyout.classList.toggle("show"); return; }
+  if (b.dataset.tool==="__point"){ e.stopPropagation(); hideShapeFlyout(); hideMeasFlyout(); pointFlyout.classList.toggle("show"); return; }
+  if (b.dataset.tool==="__meas"){ e.stopPropagation(); hideShapeFlyout(); hidePointFlyout(); measFlyout.classList.toggle("show"); return; }
+  setTool(b.dataset.tool); hideShapeFlyout(); hidePointFlyout(); hideMeasFlyout();
 }));
 // ≡ menu dropdown (file / view)
 const menuBtn = document.getElementById("menu-btn");
@@ -2771,7 +3178,7 @@ const menuDrop = document.getElementById("menu-dropdown");
 menuBtn.addEventListener("click", (e)=>{ e.stopPropagation(); menuDrop.classList.toggle("show"); });
 menuDrop.addEventListener("click", ()=> menuDrop.classList.remove("show")); // an item was chosen
 // one document click closes all transient popups
-document.addEventListener("click", ()=>{ hideShapeFlyout(); menuDrop.classList.remove("show"); hideContextMenu(); });
+document.addEventListener("click", ()=>{ hideShapeFlyout(); hidePointFlyout(); hideMeasFlyout(); menuDrop.classList.remove("show"); hideContextMenu(); });
 document.getElementById("chk-snap").addEventListener("change", render);
 document.getElementById("chk-dim").addEventListener("change", render);
 document.getElementById("grid-size").addEventListener("input", render);
@@ -2891,6 +3298,60 @@ document.getElementById("btn-zip-flip").addEventListener("click", ()=>{
   if (!z){ alert("ファスナーの線を選んでから押してください。"); return; }
   pushUndo();
   z.zipEnd = (z.zipEnd===0) ? 1 : 0;
+  saveLocal(); render();
+});
+
+// ----- 計測のボタン -----
+document.getElementById("btn-meas-clear").addEventListener("click", ()=>{
+  clearMeasure(); multiSel = []; render();
+});
+// 書き込み／取り消しを1つのボタンで行き来する。
+// 書き込んだ文字には目印（meas:true）を付けて、後からまとめて消せるようにする。
+document.getElementById("btn-meas-label").addEventListener("click", ()=>{
+  if (!measure || measure.straight) return;
+  if (measure.textId){                                   // すでに書き込み済み → 消す
+    pushUndo();
+    project.parts = project.parts.filter(p=>p.id!==measure.textId);
+    project.texts = project.texts.filter(t=>t.id!==measure.textId);
+    measure.textId = null;
+    saveLocal(); render(); return;
+  }
+  pushUndo();
+  const id = "p"+(idCounter++);
+  const col = "#111827";
+  if (measure.kind==="rad"){
+    // アール：中心から円弧へ引いた線に R○○ と入れる
+    const p = { id, kind:"mdim", meas:true, color:col, closed:false, name:"", qty:1, fabric:"",
+      seam:0, stitch:0, group:null, notches:[], mlabel:"R"+Math.round(measure.value), moff:0, mone:true,
+      nodes:[ {x:measure.c.x, y:measure.c.y, hIn:null, hOut:null},
+              {x:measure.mid.x, y:measure.mid.y, hIn:null, hOut:null} ] };
+    project.parts.push(p);
+  } else {
+    // 周長：測った両端に引き出し線を立て、その先に寸法線を渡す
+    const path = measure.path;
+    const A = path[0], B = path[path.length-1];
+    // 2点の高さが違っても、寸法線は水平（または垂直）にする＝製図の作法。
+    // 引き出し線は各点からその線まで、長さが違ってよい。
+    const axis = Math.abs(B.x-A.x) >= Math.abs(B.y-A.y) ? "h" : "v";
+    // パーツの重心と反対側（＝図面の外）へ逃がす
+    const host = project.parts.find(q=>q.id===measure.partId);
+    let cx=0, cy=0;
+    if (host){ for (const q of host.nodes){ cx+=q.x; cy+=q.y; } cx/=host.nodes.length; cy/=host.nodes.length; }
+    let pos;
+    if (axis==="h"){
+      const ys = path.map(q=>q.y);
+      pos = ((A.y+B.y)/2 <= cy) ? Math.min(...ys)-25 : Math.max(...ys)+25;
+    } else {
+      const xs = path.map(q=>q.x);
+      pos = ((A.x+B.x)/2 <= cx) ? Math.min(...xs)-25 : Math.max(...xs)+25;
+    }
+    const p = { id, kind:"mdim", meas:true, color:col, closed:false, name:"", qty:1, fabric:"",
+      seam:0, stitch:0, group:null, notches:[], mlabel:Math.round(measure.value)+"mm",
+      maxis:axis, mpos:pos,
+      nodes:[ {x:A.x, y:A.y, hIn:null, hOut:null}, {x:B.x, y:B.y, hIn:null, hOut:null} ] };
+    project.parts.push(p);
+  }
+  measure.textId = id;
   saveLocal(); render();
 });
 
