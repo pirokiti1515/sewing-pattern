@@ -100,7 +100,11 @@
     max-width: 70%;
   }
   #hint.show { display: block; }
-  #readout { font-size: 11px; color: #9ca3af; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  /* 座標と倍率：パーツ一覧の一番下に置く */
+  #readout { font-size: 11px; color: #6b7280; white-space: nowrap; font-variant-numeric: tabular-nums;
+    margin-top: auto; padding-top: 10px; border-top: 1px solid #e5e7eb; text-align: center; }
+  #sidebar { display: flex; flex-direction: column; }
+  #sidebar #part-list { flex: 0 0 auto; }
   #btn-help.active { background: #2563eb; border-color: #93c5fd; }
   #toolbar button.toggle.on { background: #2563eb; border-color: #93c5fd; color: #fff; }
   /* これから描くパーツの色えらび（白も見えるよう枠を付ける） */
@@ -201,8 +205,10 @@
   #context-menu .cm-colors .chip:hover { transform: scale(1.2); }
   #context-menu .cm-sep { height: 1px; background: #4b5563; margin: 4px 0; }
   #context-menu .cm-row { display: flex; align-items: center; gap: 6px; padding: 5px 10px; font-size: 12px; color: #e5e7eb; }
-  #context-menu .cm-row input { width: 56px; background: #111827; color: #f9fafb; border: 1px solid #4b5563;
+  #context-menu .cm-row input[type=number] { width: 56px; background: #111827; color: #f9fafb; border: 1px solid #4b5563;
     border-radius: 4px; padding: 3px 5px; font-size: 12px; }
+  #context-menu .cm-check { cursor: pointer; }
+  #context-menu .cm-check:hover { background: #374151; }
 
   /* ---- 印刷プレビュー ---- */
   #print-back { display:none; position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:60; }
@@ -248,16 +254,17 @@
 </head>
 <body>
   <div id="toolbar">
-    <span class="title">縫製図面エディタ</span>
     <button id="btn-undo" title="元に戻す (Ctrl/⌘+Z)" disabled>↶</button>
     <button id="btn-redo" title="やり直し (Ctrl/⌘+Shift+Z)" disabled>↷</button>
     <span class="sep"></span>
     <!-- 常時表示の表示オプション -->
     <span class="ctx" id="ctx-common">
       <label><input type="checkbox" id="chk-snap" checked> スナップ</label>
-      <label>格子<input type="number" id="grid-size" value="10" min="1" step="1">mm</label>
+      <span style="display:none">
+        <input type="number" id="grid-size" value="10" min="1" step="1">
+        <input type="checkbox" id="chk-dim">
+      </span>
       <label title="パーツ同士の角・辺に吸着"><input type="checkbox" id="chk-magnet" checked>🧲吸着</label>
-      <label title="全パーツの辺の寸法を表示"><input type="checkbox" id="chk-dim">寸法</label>
     </span>
     <!-- 編集ツールの時だけ：接円弧 -->
     <span class="ctx" id="ctx-edit">
@@ -331,7 +338,6 @@
       <label title="文字の色"><input type="color" id="text-color" value="#111827" style="width:26px;height:22px;padding:0;border:1px solid #4b5563;border-radius:4px;background:none"></label>
     </span>
     <span class="spacer"></span>
-    <span id="readout" title="カーソル位置と表示倍率"></span>
     <button id="btn-help" title="操作ヒントの表示/非表示">?</button>
     <button id="btn-sidebar" title="パーツ一覧の表示/非表示">▤ 一覧</button>
     <div id="menu-wrap">
@@ -439,6 +445,7 @@
         <b>画面を動かす</b>：<b>右ドラッグ</b>／<b>control を押しながら指を動かす</b><br>
         （ホイールで拡大縮小）
       </p>
+      <div id="readout" title="カーソル位置と表示倍率"></div>
     </div>
   </div>
 
@@ -2520,6 +2527,15 @@ function openContextMenu(sp){
 let ctxTarget = null;   // { part } or { text } the object menu is acting on
 // 右クリックメニューの中の「歯の間隔」をその場で反映する
 document.getElementById("context-menu").addEventListener("input", (e)=>{
+  if (e.target.id === "cm-grid"){                 // 格子の間隔
+    const g = Math.max(1, parseFloat(e.target.value)||10);
+    document.getElementById("grid-size").value = g;
+    saveLocal(); render(); return;
+  }
+  if (e.target.id === "cm-dim"){                  // 寸法の表示
+    document.getElementById("chk-dim").checked = e.target.checked;
+    saveLocal(); render(); return;
+  }
   if (e.target.id !== "cm-zip-pitch" || !ctxTarget || !ctxTarget.part) return;
   ctxTarget.part.zipPitch = Math.min(20, Math.max(1, parseFloat(e.target.value)||3));
   saveLocal(); render();
@@ -2533,7 +2549,12 @@ function placeMenu(m, x, y){
 function showFileMenu(x, y){
   ctxTarget = null;
   const m = document.getElementById("context-menu");
+  const grid = document.getElementById("grid-size").value;
+  const dimOn = document.getElementById("chk-dim").checked;
   m.innerHTML = `
+    <div class="cm-row">格子 <input type="number" id="cm-grid" value="${grid}" min="1" step="1">mm</div>
+    <label class="cm-row cm-check"><input type="checkbox" id="cm-dim"${dimOn?" checked":""}> 寸法を表示</label>
+    <div class="cm-sep"></div>
     <button data-cmd="new">📄 新規作成</button>
     <div class="cm-sep"></div>
     <button data-cmd="fit">🔎 全体表示</button>
@@ -2575,8 +2596,13 @@ document.getElementById("context-menu").addEventListener("click", (e)=>{
     if (ctxTarget.text) ctxTarget.text.color = c; else ctxTarget.part.color = c;
     saveLocal(); render(); hideContextMenu(); return;
   }
-  // 歯の間隔はメニューを開いたまま調整できるようにする
-  if (e.target.id === "cm-zip-pitch") return;
+  // メニューを開いたまま調整できるものは、ここで閉じない
+  if (e.target.id === "cm-zip-pitch" || e.target.id === "cm-grid") return;
+  if (e.target.id === "cm-dim"){
+    document.getElementById("chk-dim").checked = e.target.checked;
+    saveLocal(); render(); return;
+  }
+  if (e.target.closest && e.target.closest(".cm-check")) return;
   const cmd = e.target.dataset.cmd; if (!cmd) return;
   hideContextMenu();
   if (cmd==="new") newProject();
