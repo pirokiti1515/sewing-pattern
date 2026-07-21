@@ -2881,7 +2881,9 @@ function openContextMenu(sp){
 }
 let ctxTarget = null;   // { part } or { text } the object menu is acting on
 // 右クリックメニューの中の「歯の間隔」をその場で反映する
-document.getElementById("context-menu").addEventListener("input", (e)=>{
+// メニューの中の設定をその場で反映する。
+// チェックは input が飛ばない環境もあるので change でも拾う。
+function applyMenuInput(e){
   if (e.target.id === "cm-grid"){                 // 格子の間隔
     const g = Math.max(1, parseFloat(e.target.value)||10);
     document.getElementById("grid-size").value = g;
@@ -2894,7 +2896,9 @@ document.getElementById("context-menu").addEventListener("input", (e)=>{
   if (e.target.id !== "cm-zip-pitch" || !ctxTarget || !ctxTarget.part) return;
   ctxTarget.part.zipPitch = Math.min(20, Math.max(1, parseFloat(e.target.value)||3));
   saveLocal(); render();
-});
+}
+document.getElementById("context-menu").addEventListener("input", applyMenuInput);
+document.getElementById("context-menu").addEventListener("change", applyMenuInput);
 document.getElementById("context-menu").addEventListener("focusin", (e)=>{
   if (e.target.id === "cm-zip-pitch") pushUndo();
 });
@@ -3178,7 +3182,13 @@ const menuDrop = document.getElementById("menu-dropdown");
 menuBtn.addEventListener("click", (e)=>{ e.stopPropagation(); menuDrop.classList.toggle("show"); });
 menuDrop.addEventListener("click", ()=> menuDrop.classList.remove("show")); // an item was chosen
 // one document click closes all transient popups
-document.addEventListener("click", ()=>{ hideShapeFlyout(); hidePointFlyout(); hideMeasFlyout(); menuDrop.classList.remove("show"); hideContextMenu(); });
+// 画面のどこかを押したら、開いているものを閉じる。
+// ただし右クリックメニューの中（数値の▲▼など）は閉じない。押すたびに閉じると調整できないため。
+document.addEventListener("click", (e)=>{
+  hideShapeFlyout(); hidePointFlyout(); hideMeasFlyout();
+  menuDrop.classList.remove("show");
+  if (!e.target.closest || !e.target.closest("#context-menu")) hideContextMenu();
+});
 document.getElementById("chk-snap").addEventListener("change", render);
 document.getElementById("chk-dim").addEventListener("change", render);
 document.getElementById("grid-size").addEventListener("input", render);
