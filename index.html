@@ -4124,8 +4124,32 @@ function wheelDelta(e){
   const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? (vpH || 800) : 1;
   return { x: e.deltaX * k, y: e.deltaY * k };
 }
+// Magic Mouse やトラックパッドは、指を離したあとも「惰性」でホイールを送り続ける。
+// 図面がすーっと流れて止めたい所で止まらないので、その尻尾を捨てる。
+// 見分け方：惰性は必ず少しずつ弱くなっていく。3回続けて弱くなったら惰性とみなす。
+// 普通のマウスのホイールは同じ強さで届くので、この条件に当たらない。
+// 逆にまた強くなったら「指がまだ触れている」とみなして、すぐ動かし始める。
+let whLastT = 0, whPrev = 0, whDecay = 0, whCoasting = false;
+function isCoasting(e){
+  const now = performance.now();
+  const mag = Math.abs(e.deltaX) + Math.abs(e.deltaY);
+  if (now - whLastT > 120){          // 間が空いた＝新しい操作の始まり
+    whLastT = now; whPrev = mag; whDecay = 0; whCoasting = false;
+    return false;
+  }
+  whLastT = now;
+  if (mag > whPrev){                 // 強くなった＝まだ撫でている
+    whDecay = 0; whCoasting = false;
+  } else if (mag < whPrev * 0.995){  // だんだん弱くなっている
+    whDecay++;
+    if (whDecay >= 3) whCoasting = true;
+  }
+  whPrev = mag;
+  return whCoasting;
+}
 svg.addEventListener("wheel", (e)=>{
   e.preventDefault();
+  if (isCoasting(e)) return;               // 惰性のぶんは効かせない
   const d = wheelDelta(e);
   const sp = svgPoint(e);
 
