@@ -438,6 +438,7 @@
         <div id="meas-flyout" class="flyout">
           <button class="tool" data-tool="dim" id="tool-dim" title="寸法線 (D)：2点間の長さを図面に入れる"><span class="ic">📏</span><span class="tl">寸法線</span></button>
           <button class="tool" data-tool="len" id="tool-len" title="周長：選んだ2点の間の輪郭の長さを測る"><span class="ic">〰</span><span class="tl">周長</span></button>
+          <button class="tool" data-tool="dist" id="tool-dist" title="直線距離：選んだ2点をまっすぐ結んだ長さを測る"><span class="ic">↔</span><span class="tl">直線</span></button>
           <button class="tool" data-tool="rad" id="tool-rad" title="アール：曲がり具合の半径を測る"><span class="ic">◜</span><span class="tl">アール</span></button>
         </div>
       </div>
@@ -1650,6 +1651,7 @@ const MODE_INFO = {
   "pt-toggle": { icon:"⇆", name:"角↔丸 の切り替え" },
   "pt-xy":     { icon:"✛", name:"座標で足す" },
   len:     { icon:"〰", name:"周長の計測" },
+  dist:    { icon:"↔", name:"直線距離の計測" },
   rad:     { icon:"◜", name:"アールの計測" },
   fillet:  { icon:"⌒",  name:"接円弧モード" }
 };
@@ -1669,6 +1671,8 @@ function updateContextBar(){
           ? (multiSel.length===0 ? "① 測りはじめの点をクリック"
            : multiSel.length===1 ? "② 通り道の点をクリック（まわる向きが決まります）"
            : "③ 終わりの点をクリック")
+       : tool==="dist"
+          ? (multiSel.length===0 ? "① 1つ目の点をクリック" : "② 2つ目の点をクリック")
           : "曲がった辺をクリックしてください");
     const lb = document.getElementById("btn-meas-label");
     lb.disabled = !measure || measure.straight;
@@ -1785,6 +1789,14 @@ function renderShapePreview(){
 function renderMeasure(){
   if (!measure || measure.straight) return;
   const frag = document.createDocumentFragment();
+  if (measure.kind==="dist" && measure.a){
+    const a = worldToScreen(measure.a), b = worldToScreen(measure.b);
+    frag.appendChild(mk("path", { d:`M${a.x} ${a.y} L${b.x} ${b.y}`, class:"meas-path" }));
+    addArrowHead(frag, a, b, "#7c3aed", 10);
+    addArrowHead(frag, b, a, "#7c3aed", 10);
+    const t = mk("text", { x:(a.x+b.x)/2, y:(a.y+b.y)/2-12, class:"meas-text", "text-anchor":"middle" });
+    t.textContent = measure.label; frag.appendChild(t);
+  }
   if (measure.kind==="len" && measure.path && measure.path.length>1){
     const d = "M" + measure.path.map(q=>{ const s=worldToScreen(q); return s.x+" "+s.y; }).join(" L");
     frag.appendChild(mk("path", { d, class:"meas-path" }));
@@ -1866,13 +1878,13 @@ function render(){
 
 // Overlay for the 選択 tool: every anchor as a small square (selected ones highlighted) + marquee box.
 function renderSelection(){
-  if (tool!=="select" && tool!=="fillet" && !isPointTool() && tool!=="len") return;   // 接円弧・ポイント・周長でも点を見せる
+  if (tool!=="select" && tool!=="fillet" && !isPointTool() && tool!=="len" && tool!=="dist") return;   // 接円弧・ポイント・周長でも点を見せる
   const frag = document.createDocumentFragment();
   // only show anchors for the selection (or every anchor while rubber-band selecting)
   const selIds = new Set(multiSel.map(m=>m.partId));
   if (selectedPartId) selIds.add(selectedPartId);
   for (const part of project.parts){
-    if (!marquee && tool!=="fillet" && !isPointTool() && tool!=="len" && !selIds.has(part.id)) continue;
+    if (!marquee && tool!=="fillet" && !isPointTool() && tool!=="len" && tool!=="dist" && !selIds.has(part.id)) continue;
     part.nodes.forEach((nd,i)=>{
       const s = worldToScreen(nd);
       const on = multiSel.some(m=>m.partId===part.id && m.idx===i);
@@ -2181,6 +2193,8 @@ function updateHint(){
     msg += " ・ 輪郭付近をクリックで合印を追加 / 右クリックで削除";
   } else if (tool==="len"){
     msg += " ・ ①始点 → ②通り道 → ③終点 の順にクリック（曲線に沿って測ります）";
+  } else if (tool==="dist"){
+    msg += " ・ 点を2つクリック＝その2点をまっすぐ結んだ距離";
   } else if (tool==="rad"){
     msg += " ・ 曲がった辺をクリック＝その丸みの半径（R）";
   } else if (isPointTool()){
@@ -2419,8 +2433,8 @@ function setTool(t){
   if (typeof filletReset==="function") filletReset();
   tool = t;
   // 接円弧は「選んだ点に効かせる」ツールなので、選択ツールからの点の選択を引き継ぐ
-  if (t!=="select" && t!=="fillet" && t.indexOf("pt-")!==0 && t!=="len"){ multiSel = []; marquee = null; selMove = null; }
-  if (t!=="len" && t!=="rad") clearMeasure();
+  if (t!=="select" && t!=="fillet" && t.indexOf("pt-")!==0 && t!=="len" && t!=="dist"){ multiSel = []; marquee = null; selMove = null; }
+  if (t!=="len" && t!=="rad" && t!=="dist") clearMeasure();
   if (t!=="pt-xy"){ xyBase = null; xyDir = null; }
   if (t!=="select" && t!=="text") selTexts = [];
   document.querySelectorAll("button.tool").forEach(b=>b.classList.toggle("active", b.dataset.tool===t));
@@ -2433,9 +2447,9 @@ function setTool(t){
   }
   const measBtn = document.getElementById("tool-meas");
   if (measBtn){
-    const isM = (t==="dim" || t==="len" || t==="rad");
+    const isM = (t==="dim" || t==="len" || t==="rad" || t==="dist");
     measBtn.classList.toggle("active", isM);
-    if (isM) document.getElementById("meas-ic").textContent = t==="dim" ? "📏" : t==="len" ? "〰" : "◜";
+    if (isM) document.getElementById("meas-ic").textContent = t==="dim" ? "📏" : t==="len" ? "〰" : t==="dist" ? "↔" : "◜";
   }
   const pointBtn = document.getElementById("tool-point");
   if (pointBtn){
@@ -2656,6 +2670,21 @@ svg.addEventListener("mousedown", (e)=>{
     // 7) 空き：範囲選択
     multiSel = []; selectedPartId = null; selVertex = null; selMode = "points"; selTexts = []; selGuide = null;
     marquee = { x0:sp.x, y0:sp.y, x1:sp.x, y1:sp.y };
+    render(); return;
+  }
+  // 直線距離：2点を選ぶと、まっすぐ結んだ長さを測る
+  if (tool==="dist"){
+    const v = findVertexAt(sp);
+    if (!v){ multiSel=[]; clearMeasure(); render(); return; }
+    if (multiSel.length>=2) multiSel = [];
+    multiSel.push({ partId:v.part.id, idx:v.idx });
+    selectedPartId = v.part.id; selMode="points";
+    if (multiSel.length===2){
+      const a = nodeOf(multiSel[0]), b = nodeOf(multiSel[1]);
+      const L = Math.hypot(b.x-a.x, b.y-a.y);
+      measure = { kind:"dist", partId:v.part.id, value:L, a:{x:a.x,y:a.y}, b:{x:b.x,y:b.y},
+                  path:[{x:a.x,y:a.y},{x:b.x,y:b.y}], label: fmtMM(L) };
+    } else clearMeasure();
     render(); return;
   }
   // 周長：2点を選ぶと、その間の輪郭に沿った長さを測る
@@ -3390,7 +3419,7 @@ function hidePointFlyout(){ pointFlyout.classList.remove("show"); }
 const measFlyout = document.getElementById("meas-flyout");
 function hideMeasFlyout(){ measFlyout.classList.remove("show"); }
 function isPointTool(){ return tool.indexOf("pt-")===0; }
-function isMeasTool(){ return tool==="len" || tool==="rad"; }
+function isMeasTool(){ return tool==="len" || tool==="rad" || tool==="dist"; }
 document.querySelectorAll("button.tool").forEach(b=> b.addEventListener("click", (e)=>{
   if (b.dataset.tool==="__shape"){ e.stopPropagation(); hidePointFlyout(); shapeFlyout.classList.toggle("show"); return; }
   if (b.dataset.tool==="__point"){ e.stopPropagation(); hideShapeFlyout(); hideMeasFlyout(); pointFlyout.classList.toggle("show"); return; }
@@ -3556,6 +3585,13 @@ document.getElementById("btn-meas-label").addEventListener("click", ()=>{
       seam:0, stitch:0, group:null, notches:[], mlabel:"R"+Math.round(measure.value), moff:0, mone:true,
       nodes:[ {x:measure.c.x, y:measure.c.y, hIn:null, hOut:null},
               {x:measure.mid.x, y:measure.mid.y, hIn:null, hOut:null} ] };
+    project.parts.push(p);
+  } else if (measure.kind==="dist"){
+    // 直線距離：2点をそのまま結ぶ寸法線（引き出し線なし）
+    const p = { id, kind:"mdim", meas:true, color:col, closed:false, name:"", qty:1, fabric:"",
+      seam:0, stitch:0, group:null, notches:[], mlabel:Math.round(measure.value)+"mm", moff:0,
+      nodes:[ {x:measure.a.x, y:measure.a.y, hIn:null, hOut:null},
+              {x:measure.b.x, y:measure.b.y, hIn:null, hOut:null} ] };
     project.parts.push(p);
   } else {
     // 周長：測った両端に引き出し線を立て、その先に寸法線を渡す
