@@ -6,7 +6,11 @@
 <title>縫製図面エディタ</title>
 <style>
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; font-family: "Hiragino Sans", "Yu Gothic", system-ui, sans-serif; }
+  /* 記号（⊹ ◫ ◗ ⇆ など）は日本語フォントに入っていないことがある。
+     Windows では Segoe UI Symbol が持っているので、最後に控えとして並べておく。 */
+  html, body { margin: 0; height: 100%;
+    font-family: "Hiragino Sans", "Yu Gothic", Meiryo, system-ui,
+                 "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif; }
   body { display: flex; flex-direction: column; overflow: hidden; background: #f3f4f6; color: #1f2937; }
 
   /* ---- Top bar (slim: undo/redo + context options + menu) ---- */
@@ -616,6 +620,7 @@
         <li><b>ピンチ</b>（2本指でつまむ） … 拡大縮小</li>
         <li><b>右ドラッグ</b> … どのツール中でも画面を動かせる</li>
         <li>右クリック（動かさずに離す） … メニュー</li>
+        <li id="help-mac-pan"><b>control を押しながら指を動かす</b> … 押し込まずに画面を動かせる（Macのみ）</li>
       </ul>
       <p>何もない所を右クリックすると、格子の間隔・寸法の表示・新規作成・保存・印刷などのメニューが出ます。</p>
 
@@ -810,12 +815,24 @@ function renderThrottled(){
   requestAnimationFrame(()=>{ rafPending = false; render(); });
 }
 
+// ===== Mac か Windows か =====
+// 開いたときに1回だけ調べて覚えておく（操作のたびに調べ直さない）。
+// Macだけの作法（control+クリック＝右クリックなど）を Windows で誤動作させないために使う。
+const IS_MAC = (function(){
+  const p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+  return /Mac|iPhone|iPad|iPod/i.test(p);
+})();
+const CMD = IS_MAC ? "⌘" : "Ctrl+";        // ショートカットの書き方
+const CMD_SHIFT = IS_MAC ? "⌘⇧" : "Ctrl+Shift+";
+
 const PALETTE = ["#2563eb","#dc2626","#16a34a","#d97706","#7c3aed","#0891b2","#db2777","#65a30d"];
+// 図面の文字。Macのヒラギノを先に、無ければWindowsの游ゴシック・メイリオへ。
+// 最後にMS書体を置いてあるので、古いWindowsでも文字化けしない。
 const FONTS = {
-  gothic: '"Hiragino Sans","Yu Gothic","Noto Sans JP",sans-serif',
-  mincho: '"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif',
-  maru:   '"Hiragino Maru Gothic ProN","Yu Gothic",sans-serif',
-  mono:   '"SFMono-Regular",Menlo,Consolas,monospace'
+  gothic: '"Hiragino Sans","Yu Gothic","Noto Sans JP",Meiryo,"MS PGothic",sans-serif',
+  mincho: '"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP","MS PMincho",serif',
+  maru:   '"Hiragino Maru Gothic ProN","Yu Gothic",Meiryo,"MS PGothic",sans-serif',
+  mono:   '"SFMono-Regular",Menlo,Consolas,"MS Gothic",monospace'
 };
 const fontOf = (t)=> FONTS[t && t.font] || FONTS.gothic;
 const STITCH_COLOR = "#dc2626";   // ステッチ線は赤
@@ -3264,7 +3281,9 @@ svg.addEventListener("mousedown", (e)=>{
   svgRect = svg.getBoundingClientRect();   // toolbar height can change -> refresh once per gesture
   // 図面の上で押した時は、ブラウザの文字選択を始めさせない（文字が青く反転するのを防ぐ）
   if (editingTextId==null) e.preventDefault();
-  if (e.button===2 || (e.button===0 && e.ctrlKey)){   // Macのcontrol+クリックも右クリック扱い
+  // Macだけ「control+クリック＝右クリック」。Windowsでは Ctrl は Ctrl+Z などを
+  // 押すために握っているキーなので、これをやると意図せずメニューが出てしまう。
+  if (e.button===2 || (IS_MAC && e.button===0 && e.ctrlKey)){
     // 右ボタン: 動かせば画面移動、動かさずに離せばメニュー（判定は mouseup で）
     const s = svgPoint(e);
     rightPan = { x:s.x, y:s.y, tx:view.tx, ty:view.ty, moved:false };
@@ -3275,6 +3294,8 @@ svg.addEventListener("mousedown", (e)=>{
   gestureSnap = snap(); // remember state so the whole gesture becomes one undo step
 
   if (e.button===1){  // 中ボタンでも画面移動（Altは曲線ハンドルの左右独立用に確保）
+    // Windowsのブラウザは中ボタンで「オートスクロール」の丸印を出してしまうので止める
+    e.preventDefault();
     panning = { x: sp.x, y: sp.y, tx: view.tx, ty: view.ty };
     return;
   }
@@ -3654,8 +3675,10 @@ svg.addEventListener("mousedown", (e)=>{
 svg.addEventListener("mousemove", (e)=>{
   const sp = svgPoint(e);
   mouseWorld = screenToWorld(sp.x, sp.y);
-  // control を押しているだけ（押し込み不要）で画面移動 — トラックパッド用
-  if (e.ctrlKey && e.buttons===0 && !rightPan && !panning && !drag && !penDrag && !handleDrag && !selMove && !shapeDrag && !textDrag && !scaleDrag && !marquee){
+  // control を押しているだけ（押し込み不要）で画面移動 — Macのトラックパッド用。
+  // Windowsのタッチパッドは二本指でなぞるだけで画面が動く（ホイールが飛んでくる）ので不要。
+  // むしろ Ctrl を握ったままマウスを動かすと図面が勝手に滑るため、Macだけに限る。
+  if (IS_MAC && e.ctrlKey && e.buttons===0 && !rightPan && !panning && !drag && !penDrag && !handleDrag && !selMove && !shapeDrag && !textDrag && !scaleDrag && !marquee){
     if (ctrlPan){                       // 2回目以降: 前回からの差分だけ動かす
       view.tx += sp.x - ctrlPan.x;
       view.ty += sp.y - ctrlPan.y;
@@ -4120,8 +4143,10 @@ document.getElementById("context-menu").addEventListener("click", (e)=>{
 const ZOOM_PER_UNIT = 0.00095;  // マウスの1カチッ（約100）で 1.10 倍＝今までと同じ感触
 const PAN_GAIN = 1.0;           // 撫でたぶんの画面移動量
 function wheelDelta(e){
-  // deltaMode: 0=ピクセル 1=行 2=ページ。行やページ単位なら概算でピクセルに直す
-  const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? (vpH || 800) : 1;
+  // deltaMode: 0=ピクセル 1=行 2=ページ。行やページ単位なら概算でピクセルに直す。
+  // Windowsの Firefox は「行」で送ってくる（ホイール1カチッ＝3行）。
+  // 1カチッが Chrome と同じ 100 になるよう 33.3 を掛け、拡大の効き具合をそろえる。
+  const k = e.deltaMode === 1 ? 33.3 : e.deltaMode === 2 ? (vpH || 800) : 1;
   return { x: e.deltaX * k, y: e.deltaY * k };
 }
 // Magic Mouse やトラックパッドは、指を離したあとも「惰性」でホイールを送り続ける。
@@ -5045,7 +5070,37 @@ function seedExample(){
 window.addEventListener("resize", ()=>{ if (printing) return; updateViewport(); render(); });
 window.addEventListener("scroll", updateViewport, true);   // keep the cached rect honest
 if (window.ResizeObserver) new ResizeObserver(()=>{ if (!printing) updateViewport(); }).observe(svg);
+// Windows ではキーや操作の呼び名が違う。開いたときに1回だけ書き換える。
+// ⌘ → Ctrl+、control+クリック → 右クリック、PDFの保存先の名前、など。
+function localizeForWindows(){
+  if (IS_MAC) return;
+  const fix = (s)=> s
+    .replace(/Ctrl\/⌘\+/g, "Ctrl+")          // 「Ctrl/⌘+Z」→「Ctrl+Z」
+    .replace(/⌘⇧/g, "Ctrl+Shift+")
+    .replace(/⌘/g, "Ctrl+")
+    .replace(/「PDFに保存」/g, "「PDF として保存」（または「Microsoft Print to PDF」）");
+  // ヘルプの本文
+  document.querySelectorAll("#help-dlg li, #help-dlg p").forEach(el=>{
+    const t = el.innerHTML;
+    const f = fix(t);
+    if (f !== t) el.innerHTML = f;
+  });
+  // Macだけの操作の説明は、Windowsでは出さない（そのかわり二本指でなぞれば動く）
+  const mp = document.getElementById("help-mac-pan");
+  if (mp) mp.innerHTML = "<b>タッチパッドを二本指でなぞる</b> … 画面が動く（ホイールと同じ）";
+  // 印刷画面の案内文（保存先の呼び名が Windows では違う）
+  const pn = document.getElementById("pd-pdf-note");
+  if (pn) pn.innerHTML = '押すと印刷の画面が開きます。<br>送信先を「<b>PDF として保存</b>」'
+                       + '（または「<b>Microsoft Print to PDF</b>」）に変えてください。';
+  // ボタンの吹き出し
+  document.querySelectorAll("[title]").forEach(el=>{
+    const t = el.getAttribute("title");
+    if (t){ const f = fix(t); if (f !== t) el.setAttribute("title", f); }
+  });
+}
+
 updateViewport();
+localizeForWindows();
 loadSettings();     // 前に決めた初期値を読み込む
 loadLocal();
 seedExample();
