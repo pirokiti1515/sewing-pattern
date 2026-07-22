@@ -38,8 +38,11 @@
   .ctx.show { display: flex; }
   /* menu dropdown */
   #menu-wrap { position: relative; }
+  /* 上のバーは横スクロールする（overflow-y:hidden）ので、その中に置くと
+     はみ出した部分が切り取られて見えなくなる。fixed にしてバーの外に出し、
+     位置は開くときに JS で合わせる。 */
   #menu-dropdown {
-    display: none; position: absolute; right: 0; top: calc(100% + 6px);
+    display: none; position: fixed; left: 0; top: 0;
     background: #1f2937; border: 1px solid #4b5563; border-radius: 8px; padding: 6px;
     box-shadow: 0 6px 20px rgba(0,0,0,.4); z-index: 20; min-width: 150px;
   }
@@ -4229,7 +4232,19 @@ document.querySelectorAll("button.tool").forEach(b=> b.addEventListener("click",
 // ≡ menu dropdown (file / view)
 const menuBtn = document.getElementById("menu-btn");
 const menuDrop = document.getElementById("menu-dropdown");
-menuBtn.addEventListener("click", (e)=>{ e.stopPropagation(); menuDrop.classList.toggle("show"); });
+// ボタンのすぐ下に出す。fixed なので位置は自分で合わせる（画面の右端からはみ出さないようにする）
+function placeMenuDrop(){
+  const r = menuBtn.getBoundingClientRect();
+  const w = menuDrop.offsetWidth;
+  menuDrop.style.top  = Math.round(r.bottom + 6) + "px";
+  menuDrop.style.left = Math.round(Math.max(6, Math.min(r.right - w, window.innerWidth - w - 6))) + "px";
+}
+menuBtn.addEventListener("click", (e)=>{
+  e.stopPropagation();
+  const open = menuDrop.classList.toggle("show");
+  if (open) placeMenuDrop();
+});
+window.addEventListener("resize", ()=>{ if (menuDrop.classList.contains("show")) placeMenuDrop(); });
 menuDrop.addEventListener("click", ()=> menuDrop.classList.remove("show")); // an item was chosen
 // one document click closes all transient popups
 // 画面のどこかを押したら、開いているものを閉じる。
