@@ -180,6 +180,10 @@
   .meas-circle { fill: none; stroke: #7c3aed; stroke-width: 1.2; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; pointer-events: none; }
   .meas-dot { fill: #7c3aed; stroke: #fff; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
   .meas-text { font-size: 13px; font-weight: 700; fill: #7c3aed; paint-order: stroke; stroke: #fff; stroke-width: 4px; }
+  .guide-pt { stroke: #7c3aed; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+  .guide-pt.on { stroke: #b45309; stroke-width: 2.4; }
+  .guide-dot { fill: #7c3aed; }
+  .guide-dot.on { fill: #b45309; }
   .snap-guide { stroke: #ec4899; stroke-width: 1; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; pointer-events: none; }
   .snap-pt { fill: #ec4899; stroke: #fff; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
   .canvas-text { paint-order: stroke; stroke: #fff; stroke-width: 3px; dominant-baseline: middle; }
@@ -276,6 +280,15 @@
       <span id="meas-out">—</span>
       <button id="btn-meas-label" title="測った値を図面に文字として入れる">図面に書き込む</button>
       <button id="btn-meas-clear" title="測った結果を消す">やり直し</button>
+    </span>
+    <span class="ctx" id="ctx-ptxy">
+      <span class="sep"></span>
+      <span id="ptxy-base" style="opacity:.85"></span>
+      <label>距離<input type="number" id="ptxy-dist" value="100" min="0.1" step="10" style="width:60px">mm</label>
+      <button id="ptxy-up" title="上に足す">↑上</button>
+      <button id="ptxy-down" title="下に足す">↓下</button>
+      <button id="ptxy-left" title="左に足す">←左</button>
+      <button id="ptxy-right" title="右に足す">→右</button>
     </span>
     <span class="ctx" id="ctx-point">
       <span class="sep"></span>
@@ -409,6 +422,7 @@
           <button class="tool" data-tool="pt-smooth" id="tool-pt-smooth" title="丸ポイントを足す：辺の押した場所に、なめらかな点を足す（形は変わりません）"><span class="ic">◗</span><span class="tl">丸を足す</span></button>
           <button class="tool" data-tool="pt-mid" id="tool-pt-mid" title="中間ポイント：選んだ点と点の間に、形を変えずに点を足す"><span class="ic">◇</span><span class="tl">中間</span></button>
           <button class="tool" data-tool="pt-toggle" id="tool-pt-toggle" title="角 ↔ 丸 の切り替え：点をクリックすると入れ替わる"><span class="ic">⇆</span><span class="tl">切替</span></button>
+          <button class="tool" data-tool="pt-xy" id="tool-pt-xy" title="座標で足す：選んだ点から、まっすぐ／指定した距離の位置に点を足す"><span class="ic">✛</span><span class="tl">座標</span></button>
         </div>
       </div>
       <span class="tp-sep"></span>
@@ -1179,7 +1193,7 @@ function resnapNotches(part){
     if (near && near.pt){ nt.x = near.pt.x; nt.y = near.pt.y; }
   }
 }
-function normalizeAllParts(){ if (!project.texts) project.texts=[]; for (const p of project.parts){ if (!p.notches) p.notches=[]; if (p.stitch==null) p.stitch=0; if (p.group===undefined) p.group=null; if (p.name==null) p.name=""; if (!p.color) p.color=DEFAULT_COLOR; migratePart(p); resnapNotches(p); }
+function normalizeAllParts(){ if (!project.texts) project.texts=[]; if (!project.guides) project.guides=[]; for (const p of project.parts){ if (!p.notches) p.notches=[]; if (p.stitch==null) p.stitch=0; if (p.group===undefined) p.group=null; if (p.name==null) p.name=""; if (!p.color) p.color=DEFAULT_COLOR; migratePart(p); resnapNotches(p); }
   for (const t of project.texts){ if (t.group===undefined) t.group=null; if (!t.font) t.font="gothic"; if (t.bold===undefined) t.bold=false; } }
 function bezierAt(seg, u){
   const mu = 1-u;
@@ -1407,6 +1421,36 @@ function findEdgeForRadius(sp){
   }
   return best.d < 14 ? best : null;
 }
+// 「座標で足す」の基準点。ここを起点に、まっすぐ／指定距離の位置へ点を足す。
+let xyBase = null;   // {partId, idx} か {guideId}
+function xyBaseNode(){
+  if (!xyBase) return null;
+  if (xyBase.guideId){
+    const g = (project.guides||[]).find(q=>q.id===xyBase.guideId);
+    return g ? { nd:g } : null;
+  }
+  const p = project.parts.find(q=>q.id===xyBase.partId);
+  return p && p.nodes[xyBase.idx] ? { part:p, nd:p.nodes[xyBase.idx] } : null;
+}
+// 目印の点を探す（クリック・吸着用）
+function findGuideAt(sp){
+  for (const g of (project.guides||[])){
+    const s = worldToScreen(g);
+    if (Math.hypot(sp.x-s.x, sp.y-s.y) < 11) return g;
+  }
+  return null;
+}
+// 目印の点を置く。輪郭には組み込まないので、パーツの形は変わらない。
+// 作図の目安に使い、線を引くときはここに吸着する。
+function addGuideAt(x, y){
+  if (!project.guides) project.guides = [];
+  pushUndo();
+  const g = { id:"g"+(idCounter++), x, y };
+  project.guides.push(g);
+  xyBase = { guideId: g.id };                       // 続けて足していけるように
+  saveLocal(); render();
+  return true;
+}
 // 辺のどこを押したか（パーツ・辺の番号・辺の中での位置0〜1）を返す
 function findEdgeSpot(sp){
   let best = { d: Infinity, part: null, i: -1, t: 0 };
@@ -1563,6 +1607,7 @@ const MODE_INFO = {
   "pt-smooth": { icon:"◗", name:"丸ポイントを足す" },
   "pt-mid":    { icon:"◇", name:"中間ポイント" },
   "pt-toggle": { icon:"⇆", name:"角↔丸 の切り替え" },
+  "pt-xy":     { icon:"✛", name:"座標で足す" },
   len:     { icon:"〰", name:"周長の計測" },
   rad:     { icon:"◜", name:"アールの計測" },
   fillet:  { icon:"⌒",  name:"接円弧モード" }
@@ -1588,7 +1633,14 @@ function updateContextBar(){
     lb.disabled = !measure || measure.straight;
     lb.textContent = (measure && measure.textId) ? "書き込みを消す" : "図面に書き込む";
   }
-  document.getElementById("ctx-point").classList.toggle("show", isPointTool());
+  document.getElementById("ctx-ptxy").classList.toggle("show", tool==="pt-xy");
+  if (tool==="pt-xy"){
+    const b = xyBaseNode();
+    document.getElementById("ptxy-base").textContent = b
+      ? `基準 (${Math.round(b.nd.x)}, ${Math.round(b.nd.y)})`
+      : "基準にする点をクリック";
+  }
+  document.getElementById("ctx-point").classList.toggle("show", isPointTool() && tool!=="pt-xy");
   if (isPointTool()){
     document.getElementById("point-mode-label").textContent =
       tool==="pt-corner" ? "◆ 辺をクリックすると角の点を足します"
@@ -1709,6 +1761,21 @@ function renderMeasure(){
   }
   gHandles.appendChild(frag);
 }
+// 目印の点。作図の目安なので、印刷には出さない。
+function renderGuides(){
+  const list = project.guides || [];
+  if (!list.length) return;
+  const frag = document.createDocumentFragment();
+  const r = 5;
+  for (const g of list){
+    const s = worldToScreen(g);
+    const on = xyBase && xyBase.guideId===g.id;
+    frag.appendChild(mk("line", { x1:s.x-r, y1:s.y, x2:s.x+r, y2:s.y, class:"guide-pt"+(on?" on":"") }));
+    frag.appendChild(mk("line", { x1:s.x, y1:s.y-r, x2:s.x, y2:s.y+r, class:"guide-pt"+(on?" on":"") }));
+    frag.appendChild(mk("circle", { cx:s.x, cy:s.y, r:2, class:"guide-dot"+(on?" on":"") }));
+  }
+  gHandles.appendChild(frag);
+}
 function renderSnapGuides(){
   if (!snapGuides.length) return;
   const w=vpW, h=vpH;
@@ -1726,6 +1793,7 @@ function render(){
   renderShapePreview();// rectangle/ellipse preview
   renderSelection();   // appends the 選択-tool overlay onto gHandles
   renderMeasure();     // 計測の重ね表示
+  renderGuides();      // 目印の点
   renderSnapGuides();  // magnet guide lines/points
   // the parts list can't change mid-drag - skip the DOM rebuild for smoothness
   if (!suppressListRender && !selMove && !handleDrag && !penDrag && !textDrag && !marquee && !shapeDrag && !drag) renderPartList();
@@ -2061,6 +2129,8 @@ function updateHint(){
       ? " ・ となり合う点を2つクリック（囲んで複数も可）＝形を変えずに間に点を足す"
     : tool==="pt-toggle"
       ? " ・ 点をクリック＝角 ↔ 丸 を入れ替える"
+    : tool==="pt-xy"
+      ? " ・ 基準の点をクリック → まっすぐな位置をクリック／↑↓←→ で距離を指定 ＝ 形を変えない目印の点が付きます（線を引くとここに吸着）"
       : " ・ 辺の足したい場所をクリック＝" + (tool==="pt-corner" ? "角の点を足す" : "丸い点を足す（形は変わりません）");
   } else if (tool==="fillet"){
     msg += " ・ 角をクリック（ドラッグで囲む＝複数 / Shift+クリックで足し引き）→ 上の半径で丸める";
@@ -2222,6 +2292,10 @@ function findPartAt(worldPt){
 function snapToVertex(wp){
   const thr = 12 / view.scale;
   let best = { d: thr, pt: null };
+  for (const g of (project.guides||[])){          // 目印の点にも吸着する
+    const d = Math.hypot(g.x-wp.x, g.y-wp.y);
+    if (d < best.d) best = { d, pt: { x:g.x, y:g.y } };
+  }
   for (const part of project.parts){
     for (const nd of part.nodes){
       const d = Math.hypot(nd.x-wp.x, nd.y-wp.y);
@@ -2288,6 +2362,7 @@ function setTool(t){
   // 接円弧は「選んだ点に効かせる」ツールなので、選択ツールからの点の選択を引き継ぐ
   if (t!=="select" && t!=="fillet" && t.indexOf("pt-")!==0 && t!=="len"){ multiSel = []; marquee = null; selMove = null; }
   if (t!=="len" && t!=="rad") clearMeasure();
+  if (t!=="pt-xy") xyBase = null;
   if (t!=="select" && t!=="text") selTexts = [];
   document.querySelectorAll("button.tool").forEach(b=>b.classList.toggle("active", b.dataset.tool===t));
   // the 図形 (shape) button stands in for rect/ellipse
@@ -2308,7 +2383,7 @@ function setTool(t){
     const isPt = (t.indexOf("pt-")===0);
     pointBtn.classList.toggle("active", isPt);
     if (isPt) document.getElementById("point-ic").textContent =
-      t==="pt-corner" ? "◆" : t==="pt-smooth" ? "◗" : t==="pt-toggle" ? "⇆" : "◇";
+      t==="pt-corner" ? "◆" : t==="pt-smooth" ? "◗" : t==="pt-toggle" ? "⇆" : t==="pt-xy" ? "✛" : "◇";
   }
   render();
 }
@@ -2542,6 +2617,27 @@ svg.addEventListener("mousedown", (e)=>{
     else measure = { kind:"rad", partId:eg.part.id, r:r.r, c:r.c, mid:r.mid, a:r.a, b:r.b,
                      value:r.r, label:"R "+fmtMM(r.r) };
     selectedPartId = eg.part.id;
+    render(); return;
+  }
+  // 座標で足す：まず基準の点を選び、そのあと まっすぐな位置をクリック／上のボタンで足す
+  if (tool==="pt-xy"){
+    const g = findGuideAt(sp);
+    if (g){ xyBase = { guideId:g.id }; render(); return; }   // 目印の点も基準にできる
+    const v = findVertexAt(sp);
+    if (v){
+      xyBase = { partId:v.part.id, idx:v.idx };
+      selectedPartId = v.part.id; selVertex = { partId:v.part.id, idx:v.idx };
+      multiSel = [{ partId:v.part.id, idx:v.idx }]; selMode="points";
+      render(); return;
+    }
+    const b = xyBaseNode();
+    if (b){
+      // 基準点から見て、横に離れていれば水平・縦に離れていれば垂直に合わせる
+      const dx = wp.x - b.nd.x, dy = wp.y - b.nd.y;
+      if (Math.abs(dx) >= Math.abs(dy)) addGuideAt(Math.round(wp.x), b.nd.y);
+      else                              addGuideAt(b.nd.x, Math.round(wp.y));
+      return;
+    }
     render(); return;
   }
   // ポイントツール
@@ -2840,6 +2936,9 @@ svg.addEventListener("dblclick", (e)=>{
 svg.addEventListener("contextmenu", (e)=>{ e.preventDefault(); });
 
 function openContextMenu(sp){
+  // 目印の点の上で右クリック → 消す
+  const gHit = findGuideAt(sp);
+  if (gHit){ showGuideMenu(sp.x, sp.y, gHit); return; }
   // Remove a notch if right-clicking near one (any tool)
   // 保存位置だけでなく「実際に描かれている位置」でも当たり判定する。
   // 過去にずれてしまった合印も、見えている所を右クリックすれば消せるように。
@@ -2905,6 +3004,15 @@ document.getElementById("context-menu").addEventListener("focusin", (e)=>{
 function placeMenu(m, x, y){
   m.style.left = x + "px"; m.style.top = y + "px"; m.classList.add("show");
 }
+function showGuideMenu(x, y, g){
+  ctxTarget = { guide: g };
+  const m = document.getElementById("context-menu");
+  m.innerHTML = `
+    <div class="cm-title">✛ 目印の点 (${Math.round(g.x)}, ${Math.round(g.y)})</div>
+    <button data-cmd="delguide">🗑 この目印を消す</button>
+    ${(project.guides||[]).length>1 ? `<button data-cmd="clearguides">✛ 目印を全部消す（${project.guides.length}個）</button>` : ""}`;
+  placeMenu(m, x, y);
+}
 function showFileMenu(x, y){
   ctxTarget = null;
   const m = document.getElementById("context-menu");
@@ -2916,6 +3024,7 @@ function showFileMenu(x, y){
     <div class="cm-sep"></div>
     <button data-cmd="new">📄 新規作成</button>
     ${measCount() ? `<button data-cmd="clearmeas">📐 計測の書き込みを全部消す（${measCount()}個）</button>` : ""}
+    ${(project.guides||[]).length ? `<button data-cmd="clearguides">✛ 目印の点を全部消す（${project.guides.length}個）</button>` : ""}
     <div class="cm-sep"></div>
     <button data-cmd="fit">🔎 全体表示</button>
     <button data-cmd="save">💾 保存</button>
@@ -2968,7 +3077,19 @@ document.getElementById("context-menu").addEventListener("click", (e)=>{
   if (e.target.closest && e.target.closest(".cm-check")) return;
   const cmd = e.target.dataset.cmd; if (!cmd) return;
   hideContextMenu();
-  if (cmd==="delmeasone" && ctxTarget){
+  if (cmd==="delguide" && ctxTarget && ctxTarget.guide){
+    pushUndo();
+    project.guides = project.guides.filter(g=>g.id!==ctxTarget.guide.id);
+    if (xyBase && xyBase.guideId===ctxTarget.guide.id) xyBase = null;
+    saveLocal(); render();
+  }
+  else if (cmd==="clearguides"){
+    pushUndo();
+    project.guides = [];
+    if (xyBase && xyBase.guideId) xyBase = null;
+    saveLocal(); render();
+  }
+  else if (cmd==="delmeasone" && ctxTarget){
     pushUndo();
     const id = ctxTarget.text ? ctxTarget.text.id : ctxTarget.part.id;
     project.texts = project.texts.filter(t=>t.id!==id);
@@ -3365,6 +3486,18 @@ document.getElementById("btn-meas-label").addEventListener("click", ()=>{
   saveLocal(); render();
 });
 
+// ----- 座標で足す：上下左右のボタン -----
+function ptxyStep(dx, dy){
+  const b = xyBaseNode();
+  if (!b){ alert("先に、基準にする点をクリックしてください。"); return; }
+  const d = Math.max(0.1, parseFloat(document.getElementById("ptxy-dist").value)||100);
+  addGuideAt(b.nd.x + dx*d, b.nd.y + dy*d);
+}
+document.getElementById("ptxy-up").addEventListener("click", ()=>ptxyStep(0,-1));
+document.getElementById("ptxy-down").addEventListener("click", ()=>ptxyStep(0,1));
+document.getElementById("ptxy-left").addEventListener("click", ()=>ptxyStep(-1,0));
+document.getElementById("ptxy-right").addEventListener("click", ()=>ptxyStep(1,0));
+
 // ----- 曲線の腕：連動 / 片側ずつ -----
 document.getElementById("btn-mirror").addEventListener("click", ()=>{
   handleMirror = !handleMirror; render();
@@ -3643,7 +3776,8 @@ function newProject(){
     if (!window.confirm(msg)) return;
   }
   pushUndo();                       // 押し間違えても ⌘Z で戻せるように
-  project = { name: "無題", unit: "mm", parts: [], texts: [] };
+  project = { name: "無題", unit: "mm", parts: [], texts: [], guides: [] };
+  xyBase = null;
   idCounter = 1;
   selectedPartId = null; multiSel = []; selTexts = []; selVertex = null; draft = null;
   scaleDrag = null; selMove = null; marquee = null;
@@ -3705,6 +3839,7 @@ function contentBounds(){
     if (t.vertical) all.push({x:t.x-h2/2, y:t.y}, {x:t.x+h2/2, y:t.y+len});
     else            all.push({x:t.x, y:t.y-h2/2}, {x:t.x+len, y:t.y+h2/2});
   }
+  for (const g of (project.guides||[])) all.push({x:g.x, y:g.y});   // 目印の点も画面に入るように
   if (!all.length) return null;
   let minx=Infinity,miny=Infinity,maxx=-Infinity,maxy=-Infinity;
   for (const n of all){ minx=Math.min(minx,n.x); miny=Math.min(miny,n.y); maxx=Math.max(maxx,n.x); maxy=Math.max(maxy,n.y); }
