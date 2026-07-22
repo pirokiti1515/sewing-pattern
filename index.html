@@ -218,6 +218,9 @@
   .vertex { fill: #fff; stroke: #2563eb; stroke-width: 1.5; vector-effect: non-scaling-stroke; cursor: grab; }
   .vertex.dragging { cursor: grabbing; fill: #2563eb; }
   .vertex.sel { fill: #f59e0b; stroke: #b45309; stroke-width: 2.5; }
+  /* 合印を入れるとき、吸着できるポイントを小さな点で見せる。狙っている点は大きく色を変える */
+  .snap-dot { fill: #fff; stroke: #2563eb; stroke-width: 1.2; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .snap-dot.on { fill: #f59e0b; stroke: #b45309; stroke-width: 2; }
   .selpt { fill: #fff; stroke: #2563eb; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
   .selpt.on { fill: #f59e0b; stroke: #b45309; stroke-width: 2; }
   .sel-box { fill: none; stroke: #2563eb; stroke-width: 1; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; }
@@ -378,6 +381,7 @@
         <input type="checkbox" id="chk-dim">
       </span>
       <label title="パーツ同士の角・辺に吸着"><input type="checkbox" id="chk-magnet" checked>🧲吸着</label>
+      <label title="ポイント（白い■・●）を表示する。合印を入れるときは、吸着できる場所が点で見えます"><input type="checkbox" id="chk-points" checked>◦ポイント</label>
     </span>
     <!-- 編集ツールの時だけ：接円弧 -->
     <span class="ctx" id="ctx-meas">
@@ -913,6 +917,8 @@ let selTexts = [];         // text ids picked with the 選択 tool
 let lastTClick = { id:null, t:0 };
 let scaleDrag = null;      // まとめて拡大縮小中
 let hoverEdge = null;       // {partId, i} edge whose middle handle is under the cursor
+let notchSnap = null;       // 合印ツールで、いま吸着しようとしているポイント {part, idx, node}
+const NOTCH_SNAP_PX = 14;   // この距離（画面上のドット）まで近づいたらポイントに吸着する
 let selMode = "points";     // "part" = whole part picked, "points" = individual points picked
 
 // The middle handle of an edge: grab it to move that whole edge.
@@ -2386,17 +2392,19 @@ function renderSelection(){
   // only show anchors for the selection (or every anchor while rubber-band selecting)
   const selIds = new Set(multiSel.map(m=>m.partId));
   if (selectedPartId) selIds.add(selectedPartId);
-  for (const part of project.parts){
-    if (!marquee && tool!=="fillet" && !isPointTool() && tool!=="len" && tool!=="dist" && !selIds.has(part.id)) continue;
-    part.nodes.forEach((nd,i)=>{
-      const s = worldToScreen(nd);
-      const on = multiSel.some(m=>m.partId===part.id && m.idx===i);
-      frag.appendChild(mk("rect", { x:s.x-4, y:s.y-4, width:8, height:8, class:"selpt"+(on?" on":"") }));
-    });
+  if (showPoints()){                                  // 上のバーの「◦ポイント」を外していたら出さない
+    for (const part of project.parts){
+      if (!marquee && tool!=="fillet" && !isPointTool() && tool!=="len" && tool!=="dist" && !selIds.has(part.id)) continue;
+      part.nodes.forEach((nd,i)=>{
+        const s = worldToScreen(nd);
+        const on = multiSel.some(m=>m.partId===part.id && m.idx===i);
+        frag.appendChild(mk("rect", { x:s.x-4, y:s.y-4, width:8, height:8, class:"selpt"+(on?" on":"") }));
+      });
+    }
   }
   // middle-of-edge handles on the selected part: grab one to move that edge
   const selPart = selectedPartId && project.parts.find(p=>p.id===selectedPartId);
-  if (tool==="select" && selPart && !marquee && selPart.nodes.length>=2){   // 辺の中央は選択ツールだけ
+  if (showPoints() && tool==="select" && selPart && !marquee && selPart.nodes.length>=2){   // 辺の中央は選択ツールだけ
     const n = selPart.nodes.length, segCount = selPart.closed ? n : n-1;
     for (let i=0;i<segCount;i++){
       const m = segMidWorld(selPart.nodes, i, selPart.closed);
@@ -2496,6 +2504,34 @@ function offScreen(part){
   const m = (part.seam||0) + 20;                       // 縫い代やスライダーのぶん
   return (x1+m < _viewBox.x0) || (x0-m > _viewBox.x1)
       || (y1+m < _viewBox.y0) || (y0-m > _viewBox.y1);
+}
+// 上のバーの「◦ポイント」。外しているとポイントを一切描かない。
+function showPoints(){
+  const c = document.getElementById("chk-points");
+  return !c || c.checked;
+}
+// 描かれているパーツだけを順に返す（非表示・レイヤー非表示・画面外は除く）
+function* drawableParts(){
+  for (const part of project.parts){
+    if (part.nodes.length < 2 || part.hidden) continue;
+    const lay = layerOf(part);
+    if (lay && !lay.visible) continue;
+    if (offScreen(part)) continue;
+    yield part;
+  }
+}
+// 画面上の点に一番近い「パーツのポイント」を探す。合印の吸着先に使う。
+function nearestNodeAt(sp, maxPx){
+  let best = null;
+  for (const part of drawableParts()){
+    if (!part.closed || part.nodes.length < 3) continue;   // 合印は閉じた輪郭にだけ付く
+    part.nodes.forEach((n,i)=>{
+      const s = worldToScreen(n);
+      const d = Math.hypot(s.x-sp.x, s.y-sp.y);
+      if (d <= maxPx && (!best || d < best.d)) best = { part, idx:i, node:n, d };
+    });
+  }
+  return best;
 }
 function renderParts(){
   gParts.innerHTML = "";
@@ -2662,10 +2698,24 @@ function renderDraft(){
 
 function renderHandles(){
   gHandles.innerHTML = "";
+  if (!showPoints()) return;                        // 「◦ポイント」を外しているときは出さない
+  const frag = document.createDocumentFragment();
+  // 合印ツールのときは、吸着できるポイントを全パーツぶん小さな点で見せる
+  if (tool === "notch"){
+    for (const part of drawableParts()){
+      if (!part.closed || part.nodes.length < 3) continue;
+      part.nodes.forEach((n,i)=>{
+        const s = worldToScreen(n);
+        const on = notchSnap && notchSnap.part.id===part.id && notchSnap.idx===i;
+        frag.appendChild(mk("circle", { cx:s.x, cy:s.y, r: on?6:3.5, class: "snap-dot"+(on?" on":"") }));
+      });
+    }
+    gHandles.appendChild(frag);
+    return;
+  }
   if (tool !== "select" || !selectedPartId) return;
   const part = project.parts.find(p=>p.id===selectedPartId);
   if (!part) return;
-  const frag = document.createDocumentFragment();
   part.nodes.forEach((n,i)=>{
     let cls = drag&&drag.index===i ? " dragging" : "";
     if (selVertex && selVertex.partId===part.id && selVertex.idx===i) cls += " sel";
@@ -2901,7 +2951,8 @@ function updateHint(){
       ? " ・ 枠の□をドラッグ=まとめて拡大縮小（Shiftで縦横比を保つ）/ 白い■=点 / オレンジ●=辺 / ダブルクリック=角↔曲線 / 右クリック=色・削除"
       : " ・ パーツ/文字をクリックで選択（文字はダブルクリックで編集）・ 空きをドラッグで囲んで選択";
   } else if (tool==="notch"){
-    msg += " ・ 輪郭付近をクリックで合印を追加 / 右クリックで削除";
+    msg += notchSnap ? " ・ このポイントに合わせて合印を入れます（クリック）"
+                     : " ・ 輪郭付近をクリックで合印を追加（ポイントに近づくと吸着）/ 右クリックで削除";
   } else if (tool==="len"){
     msg += " ・ ①始点 → ②通り道 → ③終点 の順にクリック（曲線に沿って測ります）";
   } else if (tool==="dist"){
@@ -3157,6 +3208,7 @@ function setTool(t){
   if (t!=="select" && t!=="fillet" && t.indexOf("pt-")!==0 && t!=="len" && t!=="dist"){ multiSel = []; marquee = null; selMove = null; }
   if (t!=="len" && t!=="rad" && t!=="dist") clearMeasure();
   if (t!=="pt-xy"){ xyBase = null; xyDir = null; }
+  if (t!=="notch") notchSnap = null;
   if (t!=="select" && t!=="text") selTexts = [];
   document.querySelectorAll("button.tool").forEach(b=>b.classList.toggle("active", b.dataset.tool===t));
   // the 図形 (shape) button stands in for rect/ellipse
@@ -3228,17 +3280,24 @@ svg.addEventListener("mousedown", (e)=>{
   }
   // Notch tool: click near an outline to drop a match mark on the nearest part
   if (tool==="notch"){
-    let best = { d: Infinity, part: null, pt: null };
-    for (const part of project.parts){
-      if (!part.closed || part.nodes.length < 3) continue;
-      const flat = flattenNodes(part.nodes, true);
-      const near = nearestOnOutline(flat, wp, true);
-      const dPx = near.d * view.scale;
-      if (dPx < best.d){ best = { d: dPx, part, pt: near.pt }; }
+    // まずポイントに吸着させる。近くにポイントがあれば、そこにぴったり付ける。
+    const snap = nearestNodeAt(sp, NOTCH_SNAP_PX);
+    let best = snap ? { d: snap.d, part: snap.part, pt: { x: snap.node.x, y: snap.node.y }, snapped: true }
+                    : { d: Infinity, part: null, pt: null, snapped: false };
+    if (!snap){
+      for (const part of project.parts){
+        if (!part.closed || part.nodes.length < 3) continue;
+        const flat = flattenNodes(part.nodes, true);
+        const near = nearestOnOutline(flat, wp, true);
+        const dPx = near.d * view.scale;
+        if (dPx < best.d){ best = { d: dPx, part, pt: near.pt, snapped: false }; }
+      }
     }
     if (best.part && best.d < 20){
       if (!best.part.notches) best.part.notches = [];
-      const nt = { x: Math.round(best.pt.x), y: Math.round(best.pt.y) };
+      // 吸着したときは、ポイントと同じ座標のままにする（丸めるとずれてしまう）
+      const nt = best.snapped ? { x: best.pt.x, y: best.pt.y }
+                              : { x: Math.round(best.pt.x), y: Math.round(best.pt.y) };
       best.part.notches.push(nt);
       mirrorNotch(best.part, nt);                 // 左右対称なら反対側にも同じ合印
       selectedPartId = best.part.id;
@@ -3709,6 +3768,14 @@ svg.addEventListener("mousemove", (e)=>{
     return;
   }
   if ((tool==="draw"||tool==="stitch") && draft){ renderThrottled(); }
+  else if (tool==="notch"){
+    // 狙っているポイントが変わったときだけ描き直す
+    const hit = nearestNodeAt(sp, NOTCH_SNAP_PX);
+    const key = hit ? hit.part.id+":"+hit.idx : null;
+    const prev = notchSnap ? notchSnap.part.id+":"+notchSnap.idx : null;
+    if (key !== prev){ notchSnap = hit; renderThrottled(); }
+    updateHint();
+  }
   else {
     // highlight the edge under the cursor so it's obvious you can grab it
     if (tool==="select" && selectedPartId && !selMove && !handleDrag){
@@ -4255,6 +4322,7 @@ document.addEventListener("click", (e)=>{
   if (!e.target.closest || !e.target.closest("#context-menu")) hideContextMenu();
 });
 document.getElementById("chk-snap").addEventListener("change", render);
+document.getElementById("chk-points").addEventListener("change", render);
 document.getElementById("chk-dim").addEventListener("change", render);
 document.getElementById("grid-size").addEventListener("input", render);
 // ? ボタン＝使い方を開く。画面下のヒント帯は、その中のチェックで出し入れする。
