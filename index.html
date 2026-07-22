@@ -1442,6 +1442,21 @@ function findGuideAt(sp){
 // 座標で足す点。輪郭には組み込まないので、パーツの形は変わらない。
 // 見た目と使い勝手は普通の点と同じ（選べる・動かせる・線を引くと吸着する）。
 function addGuideAt(x, y){
+  // パーツの線の上（またはすぐ近く）なら、その線の点として入れる。
+  // 直線の途中に入れるぶんには形は変わらないし、輪郭の一部として扱える。
+  const spot = findOutlineSpotWorld({ x, y });
+  if (spot){
+    pushUndo();
+    if (insertNodeOnSegment(spot.part, spot.i, spot.t)){
+      const at = spot.i + 1;
+      xyBase = { partId: spot.part.id, idx: at };
+      selectedPartId = spot.part.id; selVertex = { partId:spot.part.id, idx:at };
+      multiSel = [{ partId:spot.part.id, idx:at }];
+      saveLocal(); render();
+      return true;
+    }
+  }
+  // 線から離れていれば、形に影響しない点として置く
   if (!project.guides) project.guides = [];
   pushUndo();
   const g = { id:"g"+(idCounter++), x, y };
@@ -1449,6 +1464,28 @@ function addGuideAt(x, y){
   xyBase = { guideId: g.id };                 // 続けて足していけるように
   saveLocal(); render();
   return true;
+}
+// その座標がパーツの輪郭の上か調べる（世界座標で判定）
+function findOutlineSpotWorld(wp){
+  const thr = 6 / view.scale;                 // 画面で6px ぶんの近さ
+  let best = { d: Infinity, part:null, i:-1, t:0 };
+  for (const part of project.parts){
+    if (part.kind || part.nodes.length < 2) continue;
+    const fi = flattenNodesIndexed(part.nodes, part.closed, 24);
+    const pts = fi.pts;
+    fi.range.forEach((rg, i)=>{
+      const end = (rg.end===0 && part.closed) ? pts.length : rg.end;
+      const count = end - rg.start;
+      for (let k=rg.start; k<end; k++){
+        const a = pts[k], b = pts[(k+1)%pts.length];
+        const dx=b.x-a.x, dy=b.y-a.y, L2=dx*dx+dy*dy||1;
+        let u=((wp.x-a.x)*dx+(wp.y-a.y)*dy)/L2; u=Math.max(0,Math.min(1,u));
+        const d=Math.hypot(wp.x-(a.x+dx*u), wp.y-(a.y+dy*u));
+        if (d<best.d) best = { d, part, i, t:(k-rg.start+u)/count };
+      }
+    });
+  }
+  return best.d < thr ? best : null;
 }
 // 辺のどこを押したか（パーツ・辺の番号・辺の中での位置0〜1）を返す
 function findEdgeSpot(sp){
