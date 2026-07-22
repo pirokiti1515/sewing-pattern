@@ -108,6 +108,46 @@
   }
   #hint.show { display: block; }
   /* 座標と倍率：パーツ一覧の一番下に置く */
+  #look-panel { border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; margin-bottom: 10px; }
+  #look-panel h2 { margin-top: 0; }
+  .look-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+  .look-row .lbl { width: 62px; color: #4b5563; flex: none; }
+  .look-row input[type=range] { flex: 1; }
+  .look-row .sw { display: flex; align-items: center; gap: 4px; color: #4b5563; }
+  .look-row .sw input[type=color] { width: 34px; height: 26px; padding: 0; border: 1px solid #d1d5db;
+    border-radius: 5px; background: none; cursor: pointer; }
+  #look-nofill { font-size: 11px; padding: 4px 7px; border: 1px solid #d1d5db; border-radius: 5px;
+    background: #f3f4f6; cursor: pointer; margin-left: auto; }
+  #look-none { font-size: 11px; color: #9ca3af; }
+  #btn-add-layer { font-size: 11px; padding: 3px 8px; border: 1px solid #d1d5db; border-radius: 5px;
+    background: #f3f4f6; cursor: pointer; float: right; text-transform: none; letter-spacing: 0; }
+  .layer-item { border: 1px solid #e5e7eb; border-radius: 7px; padding: 6px; margin-bottom: 5px; background: #fff; }
+  .layer-item.active { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,.15); }
+  .layer-item .row { display: flex; align-items: center; gap: 6px; }
+  .layer-item .eye { border: none; background: none; cursor: pointer; font-size: 14px; padding: 0 2px; }
+  .layer-item .eye.off { opacity: .3; }
+  .layer-item input[type=text] { flex: 1; min-width: 0; border: 1px solid #e5e7eb; border-radius: 5px;
+    padding: 3px 5px; font-size: 12px; }
+  .layer-item .cnt { font-size: 11px; color: #9ca3af; flex: none; }
+  .layer-item .del { border: none; background: none; cursor: pointer; font-size: 13px; opacity: .6; }
+  .layer-item .oprow { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; color: #6b7280; }
+  .layer-item .oprow input { flex: 1; }
+  .layer-item .tw { border: none; background: none; cursor: pointer; font-size: 10px; color: #6b7280; padding: 0 2px; }
+  .part-item.child { margin-left: 16px; border-left: 2px solid #e5e7eb; }
+  .part-item.in-group { margin-left: 30px; border-left-color: #c4b5fd; }
+  .group-item { margin-left: 16px; border: 1px solid #ddd6fe; border-left: 2px solid #7c3aed;
+    border-radius: 7px; padding: 5px 6px; margin-bottom: 4px; background: #faf5ff; }
+  .group-item .row { display: flex; align-items: center; gap: 6px; }
+  .group-item .tw { border: none; background: none; cursor: pointer; font-size: 10px; color: #6b7280; padding: 0 2px; }
+  .group-item .gicon { font-size: 12px; }
+  .group-item input[type=text] { flex: 1; min-width: 0; border: 1px solid #e9d5ff; border-radius: 5px;
+    padding: 3px 5px; font-size: 12px; background: #fff; }
+  .group-item .cnt { font-size: 11px; color: #9ca3af; flex: none; }
+  .group-item .eye, .group-item .del { border: none; background: none; cursor: pointer; font-size: 12px; padding: 0 2px; }
+  .group-item .eye.off { opacity: .3; }
+  .part-item .thumb { width: 18px; height: 14px; border: 1.5px solid #111827; border-radius: 3px; flex: none; }
+  .part-item .eye { border: none; background: none; cursor: pointer; font-size: 12px; padding: 0 2px; }
+  .part-item .eye.off { opacity: .3; }
   #readout { font-size: 11px; color: #6b7280; white-space: nowrap; font-variant-numeric: tabular-nums;
     margin-top: auto; padding-top: 10px; border-top: 1px solid #e5e7eb; text-align: center; }
   #sidebar { display: flex; flex-direction: column; }
@@ -220,6 +260,54 @@
   #context-menu .cm-check { cursor: pointer; }
   #context-menu .cm-check:hover { background: #374151; }
 
+  /* ---- 設定 ---- */
+  #set-back { display:none; position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:60; }
+  #set-back.show { display:block; }
+  #set-dlg { display:none; position:fixed; z-index:61; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:min(460px, 94vw); max-height:92vh; background:#fff; border-radius:10px;
+    box-shadow:0 20px 60px rgba(0,0,0,.35); flex-direction:column; overflow:hidden; }
+  #set-dlg.show { display:flex; }
+  #set-dlg .sd-head { background:#1f2937; color:#fff; padding:9px 12px; font-size:14px; font-weight:600;
+    display:flex; align-items:center; justify-content:space-between; flex:none; }
+  #set-dlg .sd-head button { background:none; border:none; color:#cbd5e1; font-size:15px; cursor:pointer; padding:2px 6px; }
+  #set-dlg .sd-body { padding:14px 18px; overflow-y:auto; font-size:13px; color:#1f2937; }
+  #set-dlg .sd-note { font-size:12px; color:#6b7280; line-height:1.6; margin:0 0 12px; }
+  #set-dlg h3 { font-size:13px; margin:16px 0 8px; padding-bottom:4px; border-bottom:2px solid #e5e7eb; }
+  #set-dlg h3:first-of-type { margin-top:0; }
+  .sd-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .sd-row > span:first-child { width:100px; flex:none; color:#4b5563; }
+  .sd-row input[type=color] { width:40px; height:26px; padding:0; border:1px solid #d1d5db; border-radius:5px; background:none; cursor:pointer; }
+  .sd-row input[type=number] { width:70px; border:1px solid #d1d5db; border-radius:5px; padding:4px 6px; font-size:13px; }
+  .sd-row select { border:1px solid #d1d5db; border-radius:5px; padding:4px 6px; font-size:13px; }
+  .sd-row input[type=range] { flex:1; }
+  .sd-row .sd-v { font-size:12px; color:#6b7280; }
+  .sd-chk { display:flex; align-items:center; gap:5px; font-size:12px; color:#4b5563; cursor:pointer; }
+  .sd-reset { margin-top:16px; width:100%; padding:8px; font-size:12px; border:1px solid #d1d5db;
+    border-radius:6px; background:#f3f4f6; cursor:pointer; }
+
+  /* ---- 使い方 ---- */
+  #help-back { display:none; position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:60; }
+  #help-back.show { display:block; }
+  #help-dlg { display:none; position:fixed; z-index:61; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:min(720px, 94vw); height:min(760px, 92vh); background:#fff; border-radius:10px;
+    box-shadow:0 20px 60px rgba(0,0,0,.35); flex-direction:column; overflow:hidden; }
+  #help-dlg.show { display:flex; }
+  #help-dlg .hd-head { background:#1f2937; color:#fff; padding:9px 12px; font-size:14px; font-weight:600;
+    display:flex; align-items:center; justify-content:space-between; flex:none; }
+  #help-dlg .hd-head button { background:none; border:none; color:#cbd5e1; font-size:15px; cursor:pointer; padding:2px 6px; }
+  #help-dlg .hd-head button:hover { color:#fff; }
+  #help-dlg .hd-body { padding:14px 18px; overflow-y:auto; font-size:13px; line-height:1.7; color:#1f2937; }
+  #help-dlg h3 { font-size:14px; margin:18px 0 6px; padding-bottom:4px; border-bottom:2px solid #e5e7eb; color:#111827; }
+  #help-dlg h3:first-child { margin-top:0; }
+  #help-dlg p { margin:6px 0; }
+  #help-dlg ul { margin:6px 0; padding-left:20px; }
+  #help-dlg li { margin:3px 0; }
+  #help-dlg table { border-collapse:collapse; width:100%; margin:6px 0; }
+  #help-dlg td { border:1px solid #e5e7eb; padding:5px 8px; vertical-align:top; }
+  #help-dlg td:first-child { width:120px; white-space:nowrap; background:#f9fafb; font-weight:600; }
+  #help-dlg .hd-chk { display:flex; align-items:center; gap:7px; margin-top:20px; padding-top:14px;
+    border-top:1px solid #e5e7eb; cursor:pointer; }
+
   /* ---- 印刷プレビュー ---- */
   #print-back { display:none; position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:60; }
   #print-back.show { display:block; }
@@ -247,6 +335,9 @@
   #print-dlg .pd-go { margin-top:auto; background:#2563eb; color:#fff; border:none; border-radius:7px;
     padding:10px; font-size:14px; font-weight:600; cursor:pointer; }
   #print-dlg .pd-go:hover { background:#1d4ed8; }
+  #print-dlg .pd-go.pdf { margin-top:6px; background:#374151; }
+  #print-dlg .pd-go.pdf:hover { background:#1f2937; }
+  #pd-pdf-note { font-size:11px; color:#6b7280; line-height:1.6; margin-top:6px; }
   #print-sheet { display: none; }
 
   @media print {
@@ -361,11 +452,12 @@
       <label title="文字の色"><input type="color" id="text-color" value="#111827" style="width:26px;height:22px;padding:0;border:1px solid #4b5563;border-radius:4px;background:none"></label>
     </span>
     <span class="spacer"></span>
-    <button id="btn-help" title="操作ヒントの表示/非表示">?</button>
+    <button id="btn-help" title="使い方">?</button>
     <button id="btn-sidebar" title="パーツ一覧の表示/非表示">▤ 一覧</button>
     <div id="menu-wrap">
       <button id="menu-btn" title="ファイル・表示">≡ メニュー</button>
       <div id="menu-dropdown">
+        <button id="btn-settings">⚙ 設定</button>
         <button id="btn-new">📄 新規作成</button>
         <button id="btn-fit">🔎 全体表示</button>
         <button id="btn-save">💾 保存</button>
@@ -374,6 +466,172 @@
       </div>
     </div>
     <input type="file" id="file-input" accept=".json" style="display:none">
+  </div>
+
+  <!-- 設定（新しく作るものの初期値） -->
+  <div id="set-back"></div>
+  <div id="set-dlg" role="dialog" aria-label="設定">
+    <div class="sd-head">⚙ 設定<button id="sd-x" title="閉じる">✕</button></div>
+    <div class="sd-body">
+      <p class="sd-note">ここで決めた値が、<b>これから新しく作るもの</b>に使われます。<br>
+      すでに描いてあるものは変わりません。</p>
+
+      <h3>パーツ</h3>
+      <div class="sd-row"><span>線の色</span><input type="color" id="sd-stroke"></div>
+      <div class="sd-row"><span>塗りの色</span><input type="color" id="sd-fill">
+        <label class="sd-chk"><input type="checkbox" id="sd-nofill"> 塗りなし</label></div>
+      <div class="sd-row"><span>塗りの濃さ</span><input type="range" id="sd-fop" min="0" max="100"><span id="sd-fop-v" class="sd-v"></span></div>
+      <div class="sd-row"><span>線の太さ</span><input type="number" id="sd-lw" min="0.5" max="20" step="0.5"><span class="sd-v">px</span></div>
+
+      <h3>文字</h3>
+      <div class="sd-row"><span>字体</span>
+        <select id="sd-font">
+          <option value="gothic">ゴシック</option>
+          <option value="mincho">明朝</option>
+          <option value="maru">丸ゴシック</option>
+          <option value="mono">等幅</option>
+        </select></div>
+      <div class="sd-row"><span>大きさ</span><input type="number" id="sd-tsize" min="4" step="1"><span class="sd-v">mm</span></div>
+      <div class="sd-row"><span>色</span><input type="color" id="sd-tcolor"></div>
+      <div class="sd-row"><span></span>
+        <label class="sd-chk"><input type="checkbox" id="sd-tbold"> 太字</label>
+        <label class="sd-chk"><input type="checkbox" id="sd-tvert"> 縦書き</label></div>
+
+      <h3>その他</h3>
+      <div class="sd-row"><span>格子</span><input type="number" id="sd-grid" min="1" step="1"><span class="sd-v">mm</span></div>
+      <div class="sd-row"><span>ステッチ</span><input type="number" id="sd-stitch" min="1" step="1"><span class="sd-v">mm（輪郭の内側）</span></div>
+      <div class="sd-row"><span>ファスナーの歯</span><input type="number" id="sd-zip" min="1" max="20" step="0.5"><span class="sd-v">mm</span></div>
+      <div class="sd-row"><span>接円弧の半径</span><input type="number" id="sd-fillet" min="0" step="1"><span class="sd-v">mm</span></div>
+
+      <button id="sd-reset" class="sd-reset">はじめの設定に戻す</button>
+    </div>
+  </div>
+
+  <!-- 使い方（? ボタン） -->
+  <div id="help-back"></div>
+  <div id="help-dlg" role="dialog" aria-label="使い方">
+    <div class="hd-head">📖 使い方<button id="hd-x" title="閉じる">✕</button></div>
+    <div class="hd-body" id="hd-body">
+      <h3>ツール</h3>
+      <p>左のツールバーから選びます。<b>▸</b> が付いているものは、押すと中身が開きます。</p>
+      <table>
+        <tr><td>⬚ 選択</td><td>パーツ・点・辺・文字の選択と編集（これ1つで一通りできます）</td></tr>
+        <tr><td>✛ ポイント ▸</td><td>点を足したり、角と丸を切り替えたり</td></tr>
+        <tr><td>✏️ ペン</td><td>クリック＝角、ドラッグ＝曲線で自由な形を描く</td></tr>
+        <tr><td>▭ 図形 ▸</td><td>四角・丸（ドラッグ、または寸法を入力して作成）</td></tr>
+        <tr><td>📏 計測 ▸</td><td>寸法線・長さ・アールを測る</td></tr>
+        <tr><td>T 文字</td><td>文字を入れる（縦書き対応）</td></tr>
+        <tr><td>🧵 ステッチ</td><td>辺をクリックすると内側に平行な点線。自由な線も引ける</td></tr>
+        <tr><td>⛓ ファスナー</td><td>歯とスライダー付きのファスナーを描く</td></tr>
+        <tr><td>↗ 矢印</td><td>地の目や引き出し線</td></tr>
+        <tr><td>⊹ 合印</td><td>輪郭に合印を付ける</td></tr>
+        <tr><td>⌒ 接円弧</td><td>選んだ角を丸める</td></tr>
+      </table>
+
+      <h3>✛ ポイント の中身</h3>
+      <table>
+        <tr><td>◆ 角を足す</td><td>辺の押した場所に、とがった点を足す</td></tr>
+        <tr><td>◗ 丸を足す</td><td>辺の押した場所に、なめらかな点を足す（形は変わりません）</td></tr>
+        <tr><td>◇ 中間</td><td>選んだ点と点の間に足す（形は変わりません）</td></tr>
+        <tr><td>⇆ 切替</td><td>点をクリックすると 角 ↔ 丸 が入れ替わる</td></tr>
+        <tr><td>✛ 座標</td><td>距離を指定して点を足す</td></tr>
+      </table>
+      <p><b>✛ 座標</b> の使い方：①基準にする点をクリック → ②置きたい向きへマウスを動かす
+      （緑の破線が伸び、長さが出ます）→ ③距離を打って Enter。<br>
+      打たずにクリックでもOK。マイナスを入れれば反対向き。
+      点は<b>パーツの線の上にだけ</b>置けます（届かない位置では破線が灰色になります）。</p>
+
+      <h3>📏 計測 の中身</h3>
+      <table>
+        <tr><td>📏 寸法線</td><td>2点をドラッグして寸法を図面に入れる</td></tr>
+        <tr><td>〰 周長</td><td>輪郭に沿った長さ（①始点 → ②通り道 → ③終点 の順にクリック）</td></tr>
+        <tr><td>↔ 直線</td><td>2点をまっすぐ結んだ距離</td></tr>
+        <tr><td>◜ アール</td><td>曲がった辺の半径（R）</td></tr>
+      </table>
+      <p>測った値は「図面に書き込む」で寸法線として残せます。
+      書き込んだものを右クリックすると、1つだけ／全部まとめて消せます。</p>
+
+      <h3>⌒ 接円弧</h3>
+      <p>丸めたい角をクリックしてから、上のバーの半径を動かします。
+      先に半径を決めておけば、角をクリックしていくだけで次々に丸められます。
+      ドラッグで囲めば複数の角をまとめて選べます。</p>
+
+      <h3>選択ツールの操作</h3>
+      <ul>
+        <li>パーツをクリック … まるごと選択・移動</li>
+        <li>白い■（点）をドラッグ … その点だけ移動</li>
+        <li>オレンジ●（辺の中央）をドラッグ … 辺ごと動かして長さを変える</li>
+        <li>点をダブルクリック … 角 ↔ 曲線</li>
+        <li>Shift+クリック … 点を追加</li>
+        <li>右クリック … 色の変更・複製・削除</li>
+        <li>2つ以上まとめて選択 … 周りに □ が出て、つかむと全体の大きさを変えられる
+            （Shift を押しながらだと縦横の比率が変わりません）</li>
+        <li>文字をクリック … 上のバーで 字体・大きさ・色・太字・縦書き を変更できる</li>
+      </ul>
+
+      <h3>レイヤーと色（右のパネル）</h3>
+      <p><b>色と不透明度</b>：パーツを選ぶと使えます。複数選べばまとめて変わります。</p>
+      <ul>
+        <li><b>線</b> … 輪郭の色</li>
+        <li><b>塗り</b> … 中の色（線とは別に指定できます）</li>
+        <li><b>塗りなし</b> … 塗りを消す／戻す</li>
+        <li><b>不透明度</b> … パーツ全体の透け具合</li>
+        <li><b>塗りの濃さ</b> … 塗りだけの濃さ</li>
+      </ul>
+      <p><b>レイヤー</b>：「＋追加」で増やせます。レイヤーをクリックすると、そこが新しく描くものの行き先になります。</p>
+      <ul>
+        <li>▼ … 開く・閉じる</li>
+        <li>👁 … 表示・非表示（レイヤーごと／パーツ1つだけ、どちらも）</li>
+        <li>不透明度 … レイヤーごと</li>
+        <li>⋮⋮ をドラッグ … 並び替え（前後関係も変わります。別のレイヤーへも移せます）</li>
+      </ul>
+      <p>グループ化したものは 🔗 の行にまとまり、名前を付けたり、まとめて表示・非表示にしたり、⛓ で解除したりできます。</p>
+
+      <h3>画面を動かす</h3>
+      <ul>
+        <li><b>指で撫でる・ホイール</b> … 画面が動く</li>
+        <li><b>ピンチ</b>（2本指でつまむ） … 拡大縮小</li>
+        <li><b>右ドラッグ</b> … どのツール中でも画面を動かせる</li>
+        <li>右クリック（動かさずに離す） … メニュー</li>
+      </ul>
+      <p>何もない所を右クリックすると、格子の間隔・寸法の表示・新規作成・保存・印刷などのメニューが出ます。</p>
+
+      <h3>ショートカット</h3>
+      <ul>
+        <li>V 選択 / P ペン / R 四角 / O 丸 / T 文字 / S ステッチ / F ファスナー / D 寸法線 / A 矢印 / N 合印 / C 接円弧</li>
+        <li>⌘Z 取り消し、⌘⇧Z やり直し</li>
+        <li>⌘C コピー、⌘V 貼り付け、⌘X 切り取り</li>
+        <li>⌘P 印刷</li>
+        <li>Delete 削除、Esc 選択解除</li>
+      </ul>
+
+      <h3>⚙ 設定（≡ メニュー）</h3>
+      <p><b>これから新しく作るもの</b>の初期値を決められます。すでに描いてあるものは変わりません。</p>
+      <ul>
+        <li>パーツ … 線の色・塗りの色・塗りの濃さ・線の太さ（塗りなしも選べます）</li>
+        <li>文字 … 字体・大きさ・色・太字・縦書き</li>
+        <li>その他 … 格子の間隔・ステッチの距離・ファスナーの歯・接円弧の半径</li>
+      </ul>
+      <p>決めた設定はこのブラウザに覚えられ、次に開いたときもそのままです。
+      「はじめの設定に戻す」で元に戻せます。</p>
+
+      <h3>印刷</h3>
+      <p>「≡ メニュー → 🖨 印刷」（⌘P）でプレビューが開きます。
+      用紙サイズと向きを選ぶと、<b>その紙に収まるように自動で縮小</b>されます。</p>
+      <p>ソファーの図面は1800mmなどになるため実寸では紙に載りませんが、
+      <b>寸法線の数字は実寸のまま</b>入り、用紙を変えても数字の大きさは変わらないので読めなくなりません。</p>
+      <p><b>PDFで保存</b>：同じ画面の「📄 PDFで保存」を押すと印刷の画面が開くので、
+      送信先を「PDFに保存」に変えてください。用紙サイズや向きの設定はそのまま効きます。</p>
+
+      <h3>保存について</h3>
+      <p>描いた図面はブラウザに自動保存されますが、<b>ブラウザのデータを消すと失われます</b>。
+      大事な図面は「≡ メニュー → 💾 保存」でファイルに保存してください。読み込みは「📂 開く」です。</p>
+      <p>図面はこのパソコンの中だけに保存され、どこにも送信されません。
+      URLを人に渡しても、相手には空の画面が開くだけで、あなたの図面は見えません。
+      （同じパソコンの同じブラウザを他の人が使う場合は見えます）</p>
+
+      <label class="hd-chk"><input type="checkbox" id="hd-hint"> 画面の下に、ツールごとの操作ヒントを出す</label>
+    </div>
   </div>
 
   <!-- 印刷プレビュー -->
@@ -405,6 +663,9 @@
         <div id="pd-info"></div>
         <div id="pd-warn"></div>
         <button id="pd-print" class="pd-go">🖨 この内容で印刷</button>
+        <button id="pd-pdf" class="pd-go pdf">📄 PDFで保存</button>
+        <div id="pd-pdf-note">押すと印刷の画面が開きます。<br>
+          送信先を「<b>PDFに保存</b>」に変えてください。</div>
       </div>
     </div>
   </div>
@@ -468,23 +729,34 @@
       <div id="hint"></div>
     </div>
     <div id="sidebar">
-      <h2>パーツ一覧　<span style="text-transform:none;letter-spacing:0;color:#9ca3af;font-weight:400">⋮⋮で並び替え</span></h2>
+      <div id="look-panel">
+        <h2>色と不透明度</h2>
+        <div class="look-row">
+          <label class="sw"><span>線</span><input type="color" id="look-stroke" value="#111827"></label>
+          <label class="sw"><span>塗り</span><input type="color" id="look-fill" value="#2563eb"></label>
+          <button id="look-nofill" title="塗りをなくす">塗りなし</button>
+        </div>
+        <div class="look-row">
+          <span class="lbl">不透明度</span>
+          <input type="range" id="look-op" min="0" max="100" value="100">
+          <span id="look-op-v">100%</span>
+        </div>
+        <div class="look-row">
+          <span class="lbl">塗りの濃さ</span>
+          <input type="range" id="look-fop" min="0" max="100" value="4">
+          <span id="look-fop-v">4%</span>
+        </div>
+        <div id="look-none">パーツを選ぶと変えられます</div>
+      </div>
+      <h2>レイヤー　<button id="btn-add-layer" title="レイヤーを追加">＋追加</button></h2>
       <div id="part-list"></div>
       <p id="empty-note">
-        <b>描く</b><br>
+        <b>まずは描いてみる</b><br>
         左の <b>▭ 図形</b> でドラッグ＝四角・丸<br>
         <b>✏️ ペン</b> でクリック＝角、ドラッグ＝曲線<br>
-        （最初の点に戻ると閉じる／Enterで確定）<br>
-        <b>T 文字</b>・<b>🧵 ステッチ</b>・<b>↗ 矢印</b>・<b>⊹ 合印</b> も同様に<br><br>
-        <b>直す</b>：<b>⬚ 選択</b> ひとつで全部できます<br>
-        ・パーツをクリック＝まるごと選択・移動<br>
-        ・白い■の点をドラッグ＝その点だけ移動<br>
-        ・オレンジ●（辺の中央）をドラッグ＝辺ごと動く<br>
-        ・点をダブルクリック＝角↔曲線<br>
-        ・Shift+クリック＝点を追加<br>
-        ・<b>右クリック＝色の変更・複製・削除</b><br><br>
-        <b>画面を動かす</b>：<b>指で撫でる・ホイール</b>／右ドラッグ<br>
-        <b>拡大縮小</b>：<b>ピンチ</b>（2本指でつまむ）
+        （最初の点に戻ると閉じる／Enterで確定）<br><br>
+        直すのは <b>⬚ 選択</b> ひとつで一通りできます。<br><br>
+        くわしい使い方は、上の <b>?</b> ボタンから。
       </p>
       <div id="readout" title="カーソル位置と表示倍率"></div>
     </div>
@@ -661,6 +933,8 @@ function renderTexts(){
   gTexts.innerHTML = "";
   const frag = document.createDocumentFragment();
   for (const t of project.texts){
+    const _lay = layerOf(t);
+    if (_lay && !_lay.visible) continue;
     if (editingTextId===t.id) continue; // hidden while its editor is open
     const s = worldToScreen(t);
     const el = mk("text", { x:s.x, y:s.y, class:"canvas-text", fill:t.color||"#111827",
@@ -1193,7 +1467,37 @@ function resnapNotches(part){
     if (near && near.pt){ nt.x = near.pt.x; nt.y = near.pt.y; }
   }
 }
-function normalizeAllParts(){ if (!project.texts) project.texts=[]; if (!project.guides) project.guides=[]; for (const p of project.parts){ if (!p.notches) p.notches=[]; if (p.stitch==null) p.stitch=0; if (p.group===undefined) p.group=null; if (p.name==null) p.name=""; if (!p.color) p.color=DEFAULT_COLOR; migratePart(p); resnapNotches(p); }
+// レイヤーの下ごしらえ。古い図面には「レイヤー1」を作ってそこに全部入れる。
+function normalizeLayers(){
+  if (!project.layers || !project.layers.length){
+    project.layers = [{ id:"L1", name:"レイヤー 1", visible:true, opacity:100 }];
+  }
+  const ids = new Set(project.layers.map(l=>l.id));
+  for (const l of project.layers){
+    if (l.visible===undefined) l.visible = true;
+    if (l.opacity===undefined) l.opacity = 100;
+    if (!l.name) l.name = "レイヤー";
+  }
+  for (const p of project.parts) if (!p.layer || !ids.has(p.layer)) p.layer = project.layers[0].id;
+  for (const t of (project.texts||[])) if (!t.layer || !ids.has(t.layer)) t.layer = project.layers[0].id;
+}
+// 線の色・塗りの色・不透明度。古い図面は color を両方に振り分ける。
+function layerOf(o){ return (project.layers||[]).find(l=>l.id===o.layer) || null; }
+// そのものの不透明度 × 属するレイヤーの不透明度
+function effOpacity(o){
+  const lay = layerOf(o);
+  const a = (o.opacity===undefined ? 100 : o.opacity) / 100;
+  const b = (lay ? lay.opacity : 100) / 100;
+  return a * b;
+}
+function normalizeLook(p){
+  if (p.stroke===undefined) p.stroke = p.color || DEFAULT_COLOR;
+  if (p.fill===undefined)   p.fill   = p.color || DEFAULT_COLOR;
+  if (p.opacity===undefined) p.opacity = 100;
+  if (p.fillOpacity===undefined) p.fillOpacity = isWhite(p.fill) ? 100 : 4;
+}
+function normalizeAllParts(){ if (!project.texts) project.texts=[]; if (!project.guides) project.guides=[]; for (const p of project.parts){ if (!p.notches) p.notches=[]; if (p.stitch==null) p.stitch=0; if (p.group===undefined) p.group=null; if (p.name==null) p.name=""; if (!p.color) p.color=DEFAULT_COLOR; normalizeLook(p); migratePart(p); resnapNotches(p); }
+  normalizeLayers();
   for (const t of project.texts){ if (t.group===undefined) t.group=null; if (!t.font) t.font="gothic"; if (t.bold===undefined) t.bold=false; } }
 function bezierAt(seg, u){
   const mu = 1-u;
@@ -1867,7 +2171,10 @@ function render(){
   renderXYPreview();   // 座標で足す時の下書き
   renderSnapGuides();  // magnet guide lines/points
   // the parts list can't change mid-drag - skip the DOM rebuild for smoothness
-  if (!suppressListRender && !selMove && !handleDrag && !penDrag && !textDrag && !marquee && !shapeDrag && !drag) renderPartList();
+  if (!suppressListRender && !selMove && !handleDrag && !penDrag && !textDrag && !marquee && !shapeDrag && !drag){
+    renderPartList(); renderLayerList();
+  }
+  renderLookPanel();
   updateHint();
   updateModeBadge();
   updateContextBar();
@@ -1979,27 +2286,35 @@ function renderParts(){
   gParts.innerHTML = "";
   const showDim = document.getElementById("chk-dim").checked;
   const frag = document.createDocumentFragment();
+  let pg = frag;                       // 今描いているパーツの入れ物（不透明度をまとめてかける）
   for (const part of project.parts){
     if (part.nodes.length < 2) continue;
+    if (part.hidden) continue;                         // 非表示のパーツ
+    const lay = layerOf(part);
+    if (lay && !lay.visible) continue;                 // 非表示のレイヤーは描かない
+    pg = mk("g", {});                                  // このパーツぶんをまとめる
+    const _op = effOpacity(part);
+    if (_op < 1) pg.setAttribute("opacity", _op.toFixed(3));
+    frag.appendChild(pg);
     // stitch line: an open dashed path (no fill, no seam/label)
     if (part.kind==="stitch"){
-      frag.appendChild(mk("path", { d: nodesScreenPath(part.nodes, false), class:"stitchline", stroke: lineColorOf(part), "data-part": part.id }));
+      pg.appendChild(mk("path", { d: nodesScreenPath(part.nodes, false), class:"stitchline", stroke: lineColorOf(part), "data-part": part.id }));
       continue;
     }
     // dimension: arrows at both ends + the measured length, recomputed live
     // ファスナー：中心線＋左右の歯＋スライダー（入る位置がひと目で分かるように）
     if (part.kind==="zip"){
-      drawZip(frag, part);
+      drawZip(pg, part);
       continue;
     }
     // 寸法線／計測の書き込み：両端に引き出し線を立て、その先に寸法線を渡す
     if (part.kind==="dim" || part.kind==="mdim"){
-      drawDimension(frag, part);
+      drawDimension(pg, part);
       continue;
     }
     // arrow: an open path with an arrowhead (grain direction / leader line)
     if (part.kind==="arrow"){
-      frag.appendChild(mk("path", { d: nodesScreenPath(part.nodes, false), class:"arrowline", stroke: lineColorOf(part),
+      pg.appendChild(mk("path", { d: nodesScreenPath(part.nodes, false), class:"arrowline", stroke: lineColorOf(part),
         "data-part": part.id }));
       // 曲がっていても向きが合うよう、折れ線に直した最後の1区間から向きを取る
       const fl = flattenNodes(part.nodes, false);
@@ -2016,16 +2331,18 @@ function renderParts(){
     }
     const selected = part.id === selectedPartId;
     const flat = flattenNodes(part.nodes, part.closed);
-    // 白いパーツは塗りが不透明なので、塗りだけ先に敷く。
-    // 後ろに回さないと、この後に描くステッチ線や縫い代線を塗りつぶして隠してしまう。
-    if (isWhite(part.color) && part.closed && part.nodes.length >= 3){
-      frag.appendChild(mk("path", { d: partScreenPath(part), fill: part.color, stroke: "none" }));
+    // 塗りは先に敷く。後ろに回さないと、この後に描くステッチ線や縫い代線を隠してしまう。
+    normalizeLook(part);
+    if (part.fill !== "none" && part.closed && part.nodes.length >= 3){
+      const fp = mk("path", { d: partScreenPath(part), fill: part.fill, stroke: "none" });
+      fp.style.fillOpacity = (part.fillOpacity/100) * (selected ? 1.6 : 1);
+      pg.appendChild(fp);
     }
     // seam allowance (draw first, underneath) — offset the flattened outline
     if (part.closed && part.seam > 0 && part.nodes.length >= 3){
       const off = outwardOffset(flat, part.seam);
       if (off){
-        frag.appendChild(mk("path", { d: screenPath(off, true), class: "seam-line", stroke: lineColorOf(part) }));
+        pg.appendChild(mk("path", { d: screenPath(off, true), class: "seam-line", stroke: lineColorOf(part) }));
       }
     }
     // topstitch line — inner parallel dotted line (whole outline, or just chosen edges)
@@ -2034,11 +2351,11 @@ function renderParts(){
       const inner = innerOffset(fi.pts, part.stitch);
       if (inner){
         if (!part.stitchEdges || !part.stitchEdges.length){
-          frag.appendChild(mk("path", { d: screenPath(inner, true), class:"stitch-line", stroke: STITCH_COLOR }));
+          pg.appendChild(mk("path", { d: screenPath(inner, true), class:"stitch-line", stroke: STITCH_COLOR }));
         } else {
           const chosen = new Set(part.stitchEdges);
           for (const run of stitchRuns(inner, fi.range, chosen, part.nodes.length)){
-            frag.appendChild(mk("path", { d: screenPath(run, false), class:"stitch-line", stroke: STITCH_COLOR }));
+            pg.appendChild(mk("path", { d: screenPath(run, false), class:"stitch-line", stroke: STITCH_COLOR }));
           }
         }
       }
@@ -2047,14 +2364,12 @@ function renderParts(){
     const path = mk("path", {
       d: partScreenPath(part),
       class: "part-outline" + (selected?" selected":""),
-      fill: part.color, stroke: lineColorOf(part),
+      fill: "none", stroke: lineColorOf(part),
       "data-part": part.id
     });
-    // 白は塗りを上で先に敷いてあるので、こちらは線だけ（塗ると上の線を隠してしまう）
-    if (isWhite(part.color)) path.setAttribute("fill", "none");
     // 線幅の指定があれば使う。CSSの指定に勝たせるため style で当てる
     if (part.lw > 0) path.style.strokeWidth = (selected ? part.lw + 1 : part.lw);
-    frag.appendChild(path);
+    pg.appendChild(path);
     // edge length labels (arc length for curved segments)
     if (showDim){
       const count = part.closed ? part.nodes.length : part.nodes.length-1;
@@ -2066,7 +2381,7 @@ function renderParts(){
         let ox = midW.x - c.x, oy = midW.y - c.y; const ol = Math.hypot(ox,oy)||1;
         const t = mk("text", { x: mid.x + ox/ol*12, y: mid.y + oy/ol*12, class:"edge-len", "text-anchor":"middle", "dominant-baseline":"middle" });
         t.textContent = Math.round(len) + "";
-        frag.appendChild(t);
+        pg.appendChild(t);
       }
     }
     // notches (match marks) — perpendicular ticks straddling the outline
@@ -2077,7 +2392,7 @@ function renderParts(){
         const px = -near.ty, py = near.tx; // perpendicular unit vector
         const a = worldToScreen({ x: near.pt.x - px*half, y: near.pt.y - py*half });
         const b = worldToScreen({ x: near.pt.x + px*half, y: near.pt.y + py*half });
-        frag.appendChild(mk("line", { x1:a.x, y1:a.y, x2:b.x, y2:b.y, class:"notch", stroke: lineColorOf(part), "data-notch":"1" }));
+        pg.appendChild(mk("line", { x1:a.x, y1:a.y, x2:b.x, y2:b.y, class:"notch", stroke: lineColorOf(part), "data-notch":"1" }));
       }
     }
     // name label at centroid — only when the user has actually named the part
@@ -2085,7 +2400,7 @@ function renderParts(){
       const c = worldToScreen(centroid(part.nodes));
       const lbl = mk("text", { x:c.x, y:c.y, class:"part-name-label", "text-anchor":"middle" });
       lbl.textContent = part.name + (part.qty>1?` ×${part.qty}`:"");
-      frag.appendChild(lbl);
+      pg.appendChild(lbl);
     }
   }
   gParts.appendChild(frag);
@@ -2142,27 +2457,206 @@ function renderHandles(){
   gHandles.appendChild(frag);
 }
 
+// ===== レイヤー =====
+let activeLayer = null;                       // 新しく描いたものが入るレイヤー
+const groupOpen = {};                         // グループを開いているか
+const groupName = {};                         // グループの名前
+function currentLayerId(){
+  normalizeLayers();
+  if (activeLayer && project.layers.some(l=>l.id===activeLayer)) return activeLayer;
+  return project.layers[0].id;
+}
+function renderLayerList(){ /* 統合したので renderPartList が両方描く */ }
+document.getElementById("btn-add-layer").addEventListener("click", ()=>{
+  pushUndo(); normalizeLayers();
+  const id = "L" + (idCounter++);
+  project.layers.push({ id, name:"レイヤー "+(project.layers.length+1), visible:true, opacity:100 });
+  activeLayer = id;
+  saveLocal(); render();
+});
+document.getElementById("part-list").addEventListener("click", (e)=>{
+  // グループの行
+  const gi = e.target.closest(".group-item");
+  if (gi){
+    const gid = gi.dataset.group;
+    const act = e.target.dataset.gact;
+    const members = project.parts.filter(p=>p.group===gid);
+    if (act==="open"){ groupOpen[gid] = (groupOpen[gid]===false); render(); return; }
+    if (act==="eye"){
+      pushUndo();
+      const allHidden = members.every(p=>p.hidden);
+      members.forEach(p=>{ p.hidden = !allHidden; });
+      saveLocal(); render(); return;
+    }
+    if (act==="ungroup"){
+      pushUndo(); members.forEach(p=>{ p.group = null; });
+      (project.texts||[]).forEach(t=>{ if (t.group===gid) t.group = null; });
+      saveLocal(); render(); return;
+    }
+    // 行そのものを押したら、まとめて選ぶ
+    if (e.target.tagName!=="INPUT"){
+      multiSel = []; members.forEach(p=>p.nodes.forEach((_,i)=>multiSel.push({partId:p.id, idx:i})));
+      selTexts = (project.texts||[]).filter(t=>t.group===gid).map(t=>t.id);
+      selectedPartId = members.length ? members[0].id : null; selMode="part";
+      render();
+    }
+    return;
+  }
+  const item = e.target.closest(".layer-item"); if (!item) return;
+  const l = project.layers.find(x=>x.id===item.dataset.layer); if (!l) return;
+  const act = e.target.dataset.act;
+  if (act==="open"){ l.open = (l.open===false); render(); return; }
+  if (act==="eye"){ pushUndo(); l.visible = !l.visible; saveLocal(); render(); return; }
+  if (act==="del"){
+    if (project.layers.length<2) return;
+    pushUndo();
+    const rest = project.layers.filter(x=>x.id!==l.id);
+    const to = rest[0].id;
+    project.parts.forEach(p=>{ if (p.layer===l.id) p.layer = to; });
+    (project.texts||[]).forEach(t=>{ if (t.layer===l.id) t.layer = to; });
+    project.layers = rest;
+    if (activeLayer===l.id) activeLayer = to;
+    saveLocal(); render(); return;
+  }
+  activeLayer = l.id; render();
+});
+document.getElementById("part-list").addEventListener("input", (e)=>{
+  const gi = e.target.closest(".group-item");
+  if (gi && e.target.dataset.gact==="name"){ groupName[gi.dataset.group] = e.target.value; return; }
+  const item = e.target.closest(".layer-item"); if (!item) return;
+  const l = project.layers.find(x=>x.id===item.dataset.layer); if (!l) return;
+  if (e.target.dataset.act==="name"){ l.name = e.target.value; saveLocal(); return; }
+  if (e.target.dataset.act==="op"){
+    l.opacity = parseInt(e.target.value,10);
+    item.querySelector(".oprow span").textContent = l.opacity + "%";
+    saveLocal(); renderThrottled();
+  }
+});
+
+// ===== 色と不透明度 =====
+function lookTargets(){
+  const ids = new Set(multiSel.map(m=>m.partId));
+  if (selectedPartId) ids.add(selectedPartId);
+  return [...ids].map(id=>project.parts.find(p=>p.id===id)).filter(p=>p && !p.kind);
+}
+function renderLookPanel(){
+  const t = lookTargets();
+  const on = t.length > 0;
+  document.getElementById("look-none").style.display = on ? "none" : "block";
+  ["look-stroke","look-fill","look-op","look-fop","look-nofill"].forEach(id=>{
+    document.getElementById(id).disabled = !on;
+    document.getElementById(id).style.opacity = on ? 1 : .4;
+  });
+  if (!on) return;
+  const p = t[0]; normalizeLook(p);
+  if (document.activeElement.id !== "look-stroke") document.getElementById("look-stroke").value = p.stroke;
+  if (document.activeElement.id !== "look-fill" && p.fill!=="none") document.getElementById("look-fill").value = p.fill;
+  if (document.activeElement.id !== "look-op"){
+    document.getElementById("look-op").value = p.opacity;
+    document.getElementById("look-op-v").textContent = p.opacity + "%";
+  }
+  if (document.activeElement.id !== "look-fop"){
+    document.getElementById("look-fop").value = p.fillOpacity;
+    document.getElementById("look-fop-v").textContent = p.fillOpacity + "%";
+  }
+}
+function applyLook(fn, once){
+  const t = lookTargets(); if (!t.length) return;
+  if (once) pushUndo();
+  t.forEach(p=>{ normalizeLook(p); fn(p); });
+  saveLocal(); renderThrottled();
+}
+document.getElementById("look-stroke").addEventListener("mousedown", ()=>pushUndo());
+document.getElementById("look-stroke").addEventListener("input", (e)=>applyLook(p=>{ p.stroke = e.target.value; }));
+document.getElementById("look-fill").addEventListener("mousedown", ()=>pushUndo());
+document.getElementById("look-fill").addEventListener("input", (e)=>applyLook(p=>{ p.fill = e.target.value; }));
+document.getElementById("look-nofill").addEventListener("click", ()=>applyLook(p=>{
+  p.fill = (p.fill==="none") ? (p.stroke||DEFAULT_COLOR) : "none"; }, true));
+document.getElementById("look-op").addEventListener("mousedown", ()=>pushUndo());
+document.getElementById("look-op").addEventListener("input", (e)=>{
+  document.getElementById("look-op-v").textContent = e.target.value + "%";
+  applyLook(p=>{ p.opacity = parseInt(e.target.value,10); });
+});
+document.getElementById("look-fop").addEventListener("mousedown", ()=>pushUndo());
+document.getElementById("look-fop").addEventListener("input", (e)=>{
+  document.getElementById("look-fop-v").textContent = e.target.value + "%";
+  applyLook(p=>{ p.fillOpacity = parseInt(e.target.value,10); });
+});
+
+// レイヤーとパーツをひとつの階層で見せる（Affinityのレイヤーパネルと同じ並び）
 function renderPartList(){
+  normalizeLayers();
   const list = document.getElementById("part-list");
   const note = document.getElementById("empty-note");
   list.innerHTML = "";
-  // fabric pieces only - stitch lines and arrows are edited by right-clicking them on the drawing
   const pieces = project.parts.filter(p => !p.kind);
   note.style.display = pieces.length ? "none" : "block";
-  for (const part of pieces){
-    const div = document.createElement("div");
-    div.className = "part-item" + (part.id===selectedPartId?" selected":"");
-    div.dataset.part = part.id;
-    div.innerHTML = `
+  const cur = currentLayerId();
+
+  // 上に描かれるものほど上に並べる
+  [...project.layers].reverse().forEach(l=>{
+    const mine = pieces.filter(p=>p.layer===l.id);
+    const texts = (project.texts||[]).filter(t=>t.layer===l.id).length;
+    const row = document.createElement("div");
+    row.className = "layer-item" + (l.id===cur ? " active" : "");
+    row.dataset.layer = l.id;
+    row.innerHTML = `
       <div class="row">
-        <span class="grip" draggable="true" title="ドラッグで並び替え">⋮⋮</span>
-        <input data-field="name" value="${escapeHtml(part.name||'')}" placeholder="名前を入力">
-        <button class="del" title="このパーツを削除">🗑</button>
+        <button class="tw" data-act="open" title="開く・閉じる">${l.open===false?"▶":"▼"}</button>
+        <button class="eye${l.visible?"":" off"}" data-act="eye" title="表示・非表示">${l.visible?"👁":"🚫"}</button>
+        <input type="text" data-act="name" value="${escapeHtml(l.name)}">
+        <span class="cnt">${mine.length + texts}</span>
+        ${project.layers.length>1 ? `<button class="del" data-act="del" title="このレイヤーを消す">🗑</button>` : ""}
       </div>
-      ${part.group ? `<div class="row"><span style="font-size:11px;color:#7c3aed">🔗 グループ ${part.group.slice(-4)}</span></div>` : ""}
-    `;
-    list.appendChild(div);
-  }
+      <div class="oprow">不透明度 <input type="range" data-act="op" min="0" max="100" value="${l.opacity}"><span>${l.opacity}%</span></div>`;
+    list.appendChild(row);
+
+    if (l.open===false) return;
+    // 中身を、グループはひとまとまりにして並べる（上に描かれるものほど上）
+    const rows = [];
+    const seen = new Set();
+    [...mine].reverse().forEach(part=>{
+      if (part.group){
+        if (seen.has(part.group)) return;
+        seen.add(part.group);
+        rows.push({ group: part.group, members: mine.filter(q=>q.group===part.group).reverse() });
+      } else rows.push({ part });
+    });
+    const partRow = (part, inGroup)=>{
+      const d = document.createElement("div");
+      d.className = "part-item child" + (inGroup?" in-group":"") + (part.id===selectedPartId?" selected":"");
+      d.dataset.part = part.id;
+      d.innerHTML = `
+        <div class="row">
+          <span class="grip" draggable="true" title="ドラッグで並び替え">⋮⋮</span>
+          <span class="thumb" style="background:${part.fill && part.fill!=="none" ? part.fill : "transparent"};border-color:${lineColorOf(part)}"></span>
+          <input data-field="name" value="${escapeHtml(part.name||'')}" placeholder="名前を入力">
+          <button class="eye${part.hidden?" off":""} pv" title="表示・非表示">${part.hidden?"🚫":"👁"}</button>
+          <button class="del" title="このパーツを削除">🗑</button>
+        </div>`;
+      return d;
+    };
+    rows.forEach(r=>{
+      if (r.part){ list.appendChild(partRow(r.part, false)); return; }
+      // グループの親行
+      const open = groupOpen[r.group] !== false;
+      const allHidden = r.members.every(q=>q.hidden);
+      const g = document.createElement("div");
+      g.className = "group-item";
+      g.dataset.group = r.group;
+      g.innerHTML = `
+        <div class="row">
+          <button class="tw" data-gact="open" title="開く・閉じる">${open?"▼":"▶"}</button>
+          <span class="gicon">🔗</span>
+          <input type="text" data-gact="name" value="${escapeHtml(groupName[r.group] || "グループ")}">
+          <span class="cnt">${r.members.length}</span>
+          <button class="eye${allHidden?" off":""}" data-gact="eye" title="まとめて表示・非表示">${allHidden?"🚫":"👁"}</button>
+          <button class="del" data-gact="ungroup" title="グループを解除">⛓</button>
+        </div>`;
+      list.appendChild(g);
+      if (open) r.members.forEach(q=>list.appendChild(partRow(q, true)));
+    });
+  });
 }
 
 
@@ -2299,9 +2793,17 @@ function addArrowHead(frag, tip, from, color, size){
   const d = `M${tip.x} ${tip.y} L${bx+px*half} ${by+py*half} L${bx-px*half} ${by-py*half} Z`;
   frag.appendChild(mk("path", { d, class:"arrowhead", fill: color, stroke: color, "stroke-width": 0.5 }));
 }
-const lineColorOf = (part)=> isWhite(part && part.color) ? "#111827" : (part ? part.color : DEFAULT_COLOR);
+const lineColorOf = (part)=>{
+  if (!part) return DEFAULT_COLOR;
+  const c = (part.stroke!==undefined) ? part.stroke : part.color;
+  return isWhite(c) ? "#111827" : (c || DEFAULT_COLOR);
+};
 function newPart(nodes, closed){
-  const part = { id: "p"+(idCounter++), name: "", qty: 1, fabric: "", color: newPartColor, seam: 0, stitch: 0, closed: !!closed, group: null, nodes, notches: [] };
+  const fillCol = (newFillColor === null) ? newPartColor : newFillColor;
+  const part = { id: "p"+(idCounter++), layer: currentLayerId(), name: "", qty: 1, fabric: "",
+    color: newPartColor, stroke: newPartColor, fill: fillCol, opacity: 100,
+    fillOpacity: isWhite(fillCol) ? 100 : newFillOpacity, lw: newLineWidth,
+    seam: 0, stitch: 0, closed: !!closed, group: null, nodes, notches: [] };
   migratePart(part);
   project.parts.push(part);
   selectedPartId = part.id;
@@ -3105,6 +3607,15 @@ function applyMenuInput(e){
     document.getElementById("grid-size").value = g;
     saveLocal(); render(); return;
   }
+  if (e.target.id === "cm-fop"){                  // 塗りの濃さ
+    if (ctxTarget && ctxTarget.part){
+      normalizeLook(ctxTarget.part);
+      ctxTarget.part.fillOpacity = parseInt(e.target.value,10);
+      const v = document.getElementById("cm-fop-v"); if (v) v.textContent = e.target.value + "%";
+      saveLocal(); renderThrottled();
+    }
+    return;
+  }
   if (e.target.id === "cm-dim"){                  // 寸法の表示
     document.getElementById("chk-dim").checked = e.target.checked;
     saveLocal(); render(); return;
@@ -3117,6 +3628,9 @@ document.getElementById("context-menu").addEventListener("input", applyMenuInput
 document.getElementById("context-menu").addEventListener("change", applyMenuInput);
 document.getElementById("context-menu").addEventListener("focusin", (e)=>{
   if (e.target.id === "cm-zip-pitch") pushUndo();
+});
+document.getElementById("context-menu").addEventListener("mousedown", (e)=>{
+  if (e.target.id === "cm-fop") pushUndo();
 });
 function placeMenu(m, x, y){
   m.style.left = x + "px"; m.style.top = y + "px"; m.classList.add("show");
@@ -3151,7 +3665,7 @@ function showFileMenu(x, y){
 }
 function showObjectMenu(x, y, part, text){
   ctxTarget = text ? { text } : { part };
-  const cur = text ? (text.color||"#111827") : (part.color||"#2563eb");
+  const cur = text ? (text.color||"#111827") : ((part.stroke!==undefined?part.stroke:part.color)||"#2563eb");
   const label = text ? `「${(text.text||"文字").slice(0,10)}」`
                      : (part.kind==="stitch" ? "🧵 ステッチ線" : part.kind==="zip" ? "⛓ ファスナー" : part.kind==="mdim" ? "📐 計測の書き込み" : part.kind==="dim" ? "📏 寸法線" : part.kind==="arrow" ? "↗ 矢印"
                         : (part.name && part.name.trim() ? "▭ "+part.name : "▭ パーツ"));
@@ -3159,6 +3673,11 @@ function showObjectMenu(x, y, part, text){
   m.innerHTML = `
     <div class="cm-title">${escapeHtml(label)}</div>
     <div class="cm-colors">${COLORS.map(c=>`<button class="chip${cur===c?' on':''}" data-color="${c}" title="この色にする" style="background:${c}"></button>`).join("")}</div>
+    ${(part && !part.kind) ? `
+      <div class="cm-row">塗りの濃さ
+        <input type="range" id="cm-fop" min="0" max="100" value="${part.fillOpacity===undefined?4:part.fillOpacity}">
+        <span id="cm-fop-v">${part.fillOpacity===undefined?4:part.fillOpacity}%</span>
+      </div>` : ""}
     <div class="cm-sep"></div>
     ${(part && part.closed && !part.kind) ? (part.stitch>0
         ? `<button data-cmd="stitchoff">🧵 内側のステッチを消す</button>`
@@ -3182,11 +3701,18 @@ document.getElementById("context-menu").addEventListener("click", (e)=>{
   if (e.target.classList.contains("chip") && ctxTarget){
     pushUndo();
     const c = e.target.dataset.color;
-    if (ctxTarget.text) ctxTarget.text.color = c; else ctxTarget.part.color = c;
+    if (ctxTarget.text) ctxTarget.text.color = c;
+    else {
+      // 描画は stroke と fill を見るので、両方そろえて変える
+      const p = ctxTarget.part;
+      normalizeLook(p);
+      p.color = c; p.stroke = c;
+      if (p.fill !== "none") p.fill = c;
+    }
     saveLocal(); render(); hideContextMenu(); return;
   }
   // メニューを開いたまま調整できるものは、ここで閉じない
-  if (e.target.id === "cm-zip-pitch" || e.target.id === "cm-grid") return;
+  if (e.target.id === "cm-zip-pitch" || e.target.id === "cm-grid" || e.target.id === "cm-fop") return;
   if (e.target.id === "cm-dim"){
     document.getElementById("chk-dim").checked = e.target.checked;
     saveLocal(); render(); return;
@@ -3293,6 +3819,16 @@ svg.addEventListener("wheel", (e)=>{
 
 window.addEventListener("keydown", (e)=>{
   if (e.target.tagName === "INPUT") return;
+  // 設定を開いている間は、下の図面側のショートカットを効かせない
+  if (document.getElementById("set-dlg").classList.contains("show")){
+    if (e.key==="Escape"){ e.preventDefault(); closeSettings(); }
+    return;
+  }
+  // 使い方を開いている間は、下の図面側のショートカットを効かせない
+  if (document.getElementById("help-dlg").classList.contains("show")){
+    if (e.key==="Escape"){ e.preventDefault(); closeHelp(); }
+    return;
+  }
   // 印刷プレビューを開いている間は、下の図面側のショートカットを効かせない
   if (document.getElementById("print-dlg").classList.contains("show")){
     if (e.key==="Escape"){ e.preventDefault(); closePrintDialog(); }
@@ -3343,6 +3879,11 @@ window.addEventListener("keydown", (e)=>{
 document.getElementById("part-list").addEventListener("click", (e)=>{
   const item = e.target.closest(".part-item");
   if (!item) return;
+  if (e.target.classList.contains("pv")){
+    const p = project.parts.find(q=>q.id===item.dataset.part);
+    if (p){ pushUndo(); p.hidden = !p.hidden; saveLocal(); render(); }
+    return;
+  }
   if (e.target.classList.contains("del")){ deletePart(item.dataset.part); return; }
   if (e.target.classList.contains("grip")) return;              // grip is for dragging only
   if (e.target.tagName === "INPUT"){
@@ -3385,13 +3926,14 @@ document.getElementById("part-list").addEventListener("click", (e)=>{
     const item = e.target.closest(".part-item");
     if (!item || !dragRowId || item.dataset.part === dragRowId){ clearMarks(); return; }
     const r = item.getBoundingClientRect();
-    const after = (e.clientY - r.top) > r.height/2;
+    const belowHalf = (e.clientY - r.top) > r.height/2;
+    // 一覧は上下を逆さま（上に描かれるものほど上）に並べているので、
+    // 画面での「下に落とす」＝データでは「前に入れる」になる。ここを取り違えると上下が逆に動く。
     pushUndo();
-    const from = project.parts.findIndex(p=>p.id===dragRowId);
-    const moved = project.parts.splice(from,1)[0];
-    let to = project.parts.findIndex(p=>p.id===item.dataset.part);
-    if (after) to += 1;
-    project.parts.splice(to, 0, moved);
+    const moved = project.parts.splice(project.parts.findIndex(p=>p.id===dragRowId), 1)[0];
+    const target = project.parts.findIndex(p=>p.id===item.dataset.part);
+    moved.layer = (project.parts[target] || {}).layer || moved.layer;   // 別のレイヤーへも運べる
+    project.parts.splice(belowHalf ? target : target + 1, 0, moved);
     dragRowId = null; clearMarks();
     saveLocal(); render();
   });
@@ -3442,11 +3984,24 @@ document.addEventListener("click", (e)=>{
 document.getElementById("chk-snap").addEventListener("change", render);
 document.getElementById("chk-dim").addEventListener("change", render);
 document.getElementById("grid-size").addEventListener("input", render);
-document.getElementById("btn-help").addEventListener("click", (e)=>{
-  e.stopPropagation();
+// ? ボタン＝使い方を開く。画面下のヒント帯は、その中のチェックで出し入れする。
+function openHelp(){
+  document.getElementById("hd-hint").checked = document.getElementById("hint").classList.contains("show");
+  document.getElementById("help-back").classList.add("show");
+  document.getElementById("help-dlg").classList.add("show");
+}
+function closeHelp(){
+  document.getElementById("help-back").classList.remove("show");
+  document.getElementById("help-dlg").classList.remove("show");
+}
+document.getElementById("btn-help").addEventListener("click", (e)=>{ e.stopPropagation(); openHelp(); });
+document.getElementById("hd-x").addEventListener("click", closeHelp);
+document.getElementById("help-back").addEventListener("click", closeHelp);
+document.getElementById("help-dlg").addEventListener("click", (e)=>e.stopPropagation());
+document.getElementById("hd-hint").addEventListener("change", (e)=>{
   const h = document.getElementById("hint");
-  h.classList.toggle("show");
-  document.getElementById("btn-help").classList.toggle("active", h.classList.contains("show"));
+  h.classList.toggle("show", e.target.checked);
+  document.getElementById("btn-help").classList.toggle("active", e.target.checked);
   render();
 });
 document.getElementById("btn-sidebar").addEventListener("click", ()=>{
@@ -3622,6 +4177,107 @@ document.getElementById("btn-meas-label").addEventListener("click", ()=>{
   saveLocal(); render();
 });
 
+// ===== 設定（新しく作るものの初期値）=====
+// 実際の値は、これまでどおり上のバーの入力欄が持っている。
+// この画面はそこへの入り口で、値は localStorage に覚えておく。
+let newFillOpacity = 4, newLineWidth = 2, newFillColor = null;   // null＝線と同じ色
+const SET_KEY = "sewing-settings";
+function saveSettings(){
+  try {
+    localStorage.setItem(SET_KEY, JSON.stringify({
+      stroke: newPartColor, fill: newFillColor, fop: newFillOpacity, lw: newLineWidth,
+      font: document.getElementById("text-font").value,
+      tsize: document.getElementById("text-size").value,
+      tcolor: document.getElementById("text-color").value,
+      tbold: document.getElementById("text-bold").checked,
+      tvert: document.getElementById("text-vertical").checked,
+      grid: document.getElementById("grid-size").value,
+      stitch: document.getElementById("stitch-mm").value,
+      zip: document.getElementById("zip-pitch").value,
+      fillet: document.getElementById("fillet-r").value
+    }));
+  } catch(_){}
+}
+function loadSettings(){
+  let v = null;
+  try { v = JSON.parse(localStorage.getItem(SET_KEY) || "null"); } catch(_){}
+  if (!v) return;
+  if (v.stroke) { newPartColor = v.stroke; renderNewColors(); }
+  newFillColor = (v.fill === undefined) ? null : v.fill;
+  if (v.fop !== undefined) newFillOpacity = v.fop;
+  if (v.lw !== undefined) newLineWidth = v.lw;
+  const set = (id, val, chk)=>{ const el=document.getElementById(id); if (el && val!==undefined){
+    if (chk) el.checked = !!val; else el.value = val; } };
+  set("text-font", v.font); set("text-size", v.tsize); set("text-color", v.tcolor);
+  set("text-bold", v.tbold, true); set("text-vertical", v.tvert, true);
+  set("grid-size", v.grid); set("stitch-mm", v.stitch); set("zip-pitch", v.zip); set("fillet-r", v.fillet);
+  const fs = document.getElementById("fillet-slider"); if (fs && v.fillet!==undefined) fs.value = v.fillet;
+}
+function openSettings(){
+  const g = (id)=>document.getElementById(id);
+  g("sd-stroke").value = newPartColor;
+  g("sd-nofill").checked = (newFillColor === "none");
+  g("sd-fill").value = (newFillColor && newFillColor!=="none") ? newFillColor : newPartColor;
+  g("sd-fill").disabled = g("sd-nofill").checked;
+  g("sd-fop").value = newFillOpacity; g("sd-fop-v").textContent = newFillOpacity + "%";
+  g("sd-lw").value = newLineWidth;
+  g("sd-font").value = g("text-font").value;
+  g("sd-tsize").value = g("text-size").value;
+  g("sd-tcolor").value = g("text-color").value;
+  g("sd-tbold").checked = g("text-bold").checked;
+  g("sd-tvert").checked = g("text-vertical").checked;
+  g("sd-grid").value = g("grid-size").value;
+  g("sd-stitch").value = g("stitch-mm").value;
+  g("sd-zip").value = g("zip-pitch").value;
+  g("sd-fillet").value = g("fillet-r").value;
+  g("set-back").classList.add("show"); g("set-dlg").classList.add("show");
+}
+function closeSettings(){
+  document.getElementById("set-back").classList.remove("show");
+  document.getElementById("set-dlg").classList.remove("show");
+}
+document.getElementById("btn-settings").addEventListener("click", openSettings);
+document.getElementById("sd-x").addEventListener("click", closeSettings);
+document.getElementById("set-back").addEventListener("click", closeSettings);
+document.getElementById("set-dlg").addEventListener("input", (e)=>{
+  const g = (id)=>document.getElementById(id);
+  switch (e.target.id){
+    case "sd-stroke": newPartColor = e.target.value; renderNewColors(); break;
+    case "sd-fill":   newFillColor = e.target.value; break;
+    case "sd-nofill": newFillColor = e.target.checked ? "none" : g("sd-fill").value;
+                      g("sd-fill").disabled = e.target.checked; break;
+    case "sd-fop":    newFillOpacity = parseInt(e.target.value,10);
+                      g("sd-fop-v").textContent = newFillOpacity + "%"; break;
+    case "sd-lw":     newLineWidth = Math.max(0.5, parseFloat(e.target.value)||2); break;
+    case "sd-font":   g("text-font").value = e.target.value; break;
+    case "sd-tsize":  g("text-size").value = e.target.value; break;
+    case "sd-tcolor": g("text-color").value = e.target.value; break;
+    case "sd-tbold":  g("text-bold").checked = e.target.checked; break;
+    case "sd-tvert":  g("text-vertical").checked = e.target.checked; break;
+    case "sd-grid":   g("grid-size").value = e.target.value; render(); break;
+    case "sd-stitch": g("stitch-mm").value = e.target.value; break;
+    case "sd-zip":    g("zip-pitch").value = e.target.value; break;
+    case "sd-fillet": g("fillet-r").value = e.target.value;
+                      { const fs=g("fillet-slider"); if (fs) fs.value = e.target.value; } break;
+    default: return;
+  }
+  saveSettings();
+});
+document.getElementById("set-dlg").addEventListener("change", (e)=>{
+  if (e.target.type==="checkbox" || e.target.tagName==="SELECT")
+    document.getElementById("set-dlg").dispatchEvent(new Event("input"));
+});
+document.getElementById("sd-reset").addEventListener("click", ()=>{
+  try { localStorage.removeItem(SET_KEY); } catch(_){}
+  newPartColor = DEFAULT_COLOR; newFillColor = null; newFillOpacity = 4; newLineWidth = 2;
+  const g=(id)=>document.getElementById(id);
+  g("text-font").value="gothic"; g("text-size").value=20; g("text-color").value="#111827";
+  g("text-bold").checked=false; g("text-vertical").checked=false;
+  g("grid-size").value=10; g("stitch-mm").value=5; g("zip-pitch").value=3; g("fillet-r").value=20;
+  const fs=g("fillet-slider"); if (fs) fs.value=20;
+  renderNewColors(); saveSettings(); openSettings(); render();
+});
+
 // ----- 座標で足す：マウスで向き、数値で距離 -----
 // 向きはマウスが示した方向（水平か垂直）。距離は入力した数値。
 // 数値にマイナスを入れれば反対向きにもできる。
@@ -3781,6 +4437,7 @@ function refreshPrintPreview(){
     ? `⚠ 図面に入れた文字が紙の上で ${smallest.toFixed(1)}mm ほどになり、読みにくいかもしれません。大きい用紙にするか、余白を減らすと大きくなります。`
     : "";
   pdEl("pd-print").disabled = !b;
+  pdEl("pd-pdf").disabled = !b;
 }
 
 function openPrintDialog(){
@@ -3798,7 +4455,7 @@ function closePrintDialog(){
 // 本体側で window.print() すると、印刷用表示への切り替えで #main が消える
 // → resize が飛ぶ → プレビュー再構築と render() が走る、を繰り返して固まってしまうため。
 let printing = false;
-function doPrint(){
+function doPrint(forPdf){
   if (printing) return;
   const plan = printPlan();
   if (!plan.b) return;
@@ -3819,7 +4476,7 @@ function doPrint(){
   // 着せ替えが反映されてから印刷ダイアログを出す
   setTimeout(()=>{
     try { window.print(); }
-    catch(err){ alert("印刷を開始できませんでした：" + err.message); }
+    catch(err){ alert((forPdf ? "PDFの保存" : "印刷") + "を開始できませんでした：" + err.message); }
     setTimeout(cleanup, 100);            // 印刷ダイアログを閉じた後に片付ける
   }, 80);
 }
@@ -3828,7 +4485,8 @@ function doPrint(){
 });
 pdEl("pd-x").addEventListener("click", closePrintDialog);
 pdEl("print-back").addEventListener("click", closePrintDialog);
-pdEl("pd-print").addEventListener("click", doPrint);
+pdEl("pd-print").addEventListener("click", ()=>doPrint(false));
+pdEl("pd-pdf").addEventListener("click", ()=>doPrint(true));
 // リサイズのたびに作り直すと重いので1フレームにまとめる（印刷中は触らない）
 let pdResizePending = false;
 window.addEventListener("resize", ()=>{
@@ -4019,6 +4677,7 @@ window.addEventListener("resize", ()=>{ if (printing) return; updateViewport(); 
 window.addEventListener("scroll", updateViewport, true);   // keep the cached rect honest
 if (window.ResizeObserver) new ResizeObserver(()=>{ if (!printing) updateViewport(); }).observe(svg);
 updateViewport();
+loadSettings();     // 前に決めた初期値を読み込む
 loadLocal();
 seedExample();
 render();
