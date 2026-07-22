@@ -183,6 +183,9 @@
   .xy-line { stroke: #16a34a; stroke-width: 1.5; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; pointer-events: none; }
   .xy-tip { fill: #fff; stroke: #16a34a; stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
   .xy-len { font-size: 13px; font-weight: 700; fill: #16a34a; paint-order: stroke; stroke: #fff; stroke-width: 4px; }
+  /* 線に届かない時は控えめな灰色にして、置けないことが分かるようにする */
+  .xy-line.off { stroke: #9ca3af; }
+  .xy-tip.off { stroke: #9ca3af; stroke-dasharray: 2 2; }
   .snap-guide { stroke: #ec4899; stroke-width: 1; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; pointer-events: none; }
   .snap-pt { fill: #ec4899; stroke: #fff; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
   .canvas-text { paint-order: stroke; stroke: #fff; stroke-width: 3px; dominant-baseline: middle; }
@@ -1456,14 +1459,16 @@ function addGuideAt(x, y){
       return true;
     }
   }
-  // 線から離れていれば、形に影響しない点として置く
-  if (!project.guides) project.guides = [];
-  pushUndo();
-  const g = { id:"g"+(idCounter++), x, y };
-  project.guides.push(g);
-  xyBase = { guideId: g.id };                 // 続けて足していけるように
-  saveLocal(); render();
-  return true;
+  // パーツの線から外れた所には置かない（何もない空間に点が散らばるのを防ぐ）
+  xyMissHint();
+  return false;
+}
+let xyMissShown = false;
+function xyMissHint(){
+  if (!xyMissShown){
+    xyMissShown = true;
+    alert("パーツの線の上にしか点は置けません。\n\n線に届く距離を入れるか、置きたい線の近くへマウスを動かしてください。");
+  }
 }
 // その座標がパーツの輪郭の上か調べる（世界座標で判定）
 function findOutlineSpotWorld(wp){
@@ -1808,9 +1813,10 @@ function renderXYPreview(){
   const len = (typed > 0) ? typed : xyDir.len;       // 数値を入れていればその長さで見せる
   const tip = { x: b.nd.x + xyDir.ux*len, y: b.nd.y + xyDir.uy*len };
   const a = worldToScreen(b.nd), c = worldToScreen(tip);
+  const onLine = !!findOutlineSpotWorld(tip);      // そこに置けるか
   const frag = document.createDocumentFragment();
-  frag.appendChild(mk("line", { x1:a.x, y1:a.y, x2:c.x, y2:c.y, class:"xy-line" }));
-  frag.appendChild(mk("rect", { x:c.x-4, y:c.y-4, width:8, height:8, class:"xy-tip" }));
+  frag.appendChild(mk("line", { x1:a.x, y1:a.y, x2:c.x, y2:c.y, class:"xy-line"+(onLine?"":" off") }));
+  frag.appendChild(mk("rect", { x:c.x-4, y:c.y-4, width:8, height:8, class:"xy-tip"+(onLine?"":" off") }));
   const t = mk("text", { x:(a.x+c.x)/2, y:(a.y+c.y)/2 - 8, class:"xy-len", "text-anchor":"middle" });
   t.textContent = "L:" + (Math.round(len*10)/10).toFixed(1);
   frag.appendChild(t);
@@ -2183,7 +2189,7 @@ function updateHint(){
     : tool==="pt-toggle"
       ? " ・ 点をクリック＝角 ↔ 丸 を入れ替える"
     : tool==="pt-xy"
-      ? " ・ ①基準の点をクリック → ②置きたい向きへマウスを動かす → ③距離を打ってEnter（打たずにクリックでもOK）"
+      ? " ・ ①基準の点をクリック → ②置きたい向きへマウスを動かす → ③距離を打ってEnter ／ 点はパーツの線の上にだけ置けます"
       : " ・ 辺の足したい場所をクリック＝" + (tool==="pt-corner" ? "角の点を足す" : "丸い点を足す（形は変わりません）");
   } else if (tool==="fillet"){
     msg += " ・ 角をクリック（ドラッグで囲む＝複数 / Shift+クリックで足し引き）→ 上の半径で丸める";
