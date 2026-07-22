@@ -180,10 +180,9 @@
   .meas-circle { fill: none; stroke: #7c3aed; stroke-width: 1.2; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; pointer-events: none; }
   .meas-dot { fill: #7c3aed; stroke: #fff; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
   .meas-text { font-size: 13px; font-weight: 700; fill: #7c3aed; paint-order: stroke; stroke: #fff; stroke-width: 4px; }
-  .guide-pt { stroke: #7c3aed; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
-  .guide-pt.on { stroke: #b45309; stroke-width: 2.4; }
-  .guide-dot { fill: #7c3aed; }
-  .guide-dot.on { fill: #b45309; }
+  .xy-line { stroke: #16a34a; stroke-width: 1.5; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .xy-tip { fill: #fff; stroke: #16a34a; stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .xy-len { font-size: 13px; font-weight: 700; fill: #16a34a; paint-order: stroke; stroke: #fff; stroke-width: 4px; }
   .snap-guide { stroke: #ec4899; stroke-width: 1; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; pointer-events: none; }
   .snap-pt { fill: #ec4899; stroke: #fff; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
   .canvas-text { paint-order: stroke; stroke: #fff; stroke-width: 3px; dominant-baseline: middle; }
@@ -284,11 +283,8 @@
     <span class="ctx" id="ctx-ptxy">
       <span class="sep"></span>
       <span id="ptxy-base" style="opacity:.85"></span>
-      <label>距離<input type="number" id="ptxy-dist" value="100" min="0.1" step="10" style="width:60px">mm</label>
-      <button id="ptxy-up" title="上に足す">↑上</button>
-      <button id="ptxy-down" title="下に足す">↓下</button>
-      <button id="ptxy-left" title="左に足す">←左</button>
-      <button id="ptxy-right" title="右に足す">→右</button>
+      <label title="向きはマウスで示し、距離はここに入れてEnter">距離<input type="number" id="ptxy-dist" placeholder="—" step="10" style="width:70px">mm</label>
+      <button id="ptxy-go" title="この距離で置く（Enterでも可）">Enter で置く</button>
     </span>
     <span class="ctx" id="ctx-point">
       <span class="sep"></span>
@@ -1422,6 +1418,9 @@ function findEdgeForRadius(sp){
   return best.d < 14 ? best : null;
 }
 // 「座標で足す」の基準点。ここを起点に、まっすぐ／指定距離の位置へ点を足す。
+let xyDir = null;         // マウスが示している向き {ux,uy} と、その先の点 {x,y,len}
+let selGuide = null;      // 選ばれている点（座標で足した点）のid
+let guideDrag = null;     // その点をドラッグ中 {id, ox, oy, startW}
 let xyBase = null;   // {partId, idx} か {guideId}
 function xyBaseNode(){
   if (!xyBase) return null;
@@ -1440,14 +1439,14 @@ function findGuideAt(sp){
   }
   return null;
 }
-// 目印の点を置く。輪郭には組み込まないので、パーツの形は変わらない。
-// 作図の目安に使い、線を引くときはここに吸着する。
+// 座標で足す点。輪郭には組み込まないので、パーツの形は変わらない。
+// 見た目と使い勝手は普通の点と同じ（選べる・動かせる・線を引くと吸着する）。
 function addGuideAt(x, y){
   if (!project.guides) project.guides = [];
   pushUndo();
   const g = { id:"g"+(idCounter++), x, y };
   project.guides.push(g);
-  xyBase = { guideId: g.id };                       // 続けて足していけるように
+  xyBase = { guideId: g.id };                 // 続けて足していけるように
   saveLocal(); render();
   return true;
 }
@@ -1637,7 +1636,8 @@ function updateContextBar(){
   if (tool==="pt-xy"){
     const b = xyBaseNode();
     document.getElementById("ptxy-base").textContent = b
-      ? `基準 (${Math.round(b.nd.x)}, ${Math.round(b.nd.y)})`
+      ? (xyDir ? `基準 (${Math.round(b.nd.x)}, ${Math.round(b.nd.y)}) → 向きを決めて数値＋Enter`
+               : `基準 (${Math.round(b.nd.x)}, ${Math.round(b.nd.y)}) → 置きたい向きへマウスを動かす`)
       : "基準にする点をクリック";
   }
   document.getElementById("ctx-point").classList.toggle("show", isPointTool() && tool!=="pt-xy");
@@ -1762,17 +1762,32 @@ function renderMeasure(){
   gHandles.appendChild(frag);
 }
 // 目印の点。作図の目安なので、印刷には出さない。
+// 座標で足す時の下書き：基準からマウスの向きへ伸びる線と、長さの表示
+function renderXYPreview(){
+  if (tool!=="pt-xy") return;
+  const b = xyBaseNode();
+  if (!b || !xyDir) return;
+  const typed = parseFloat(document.getElementById("ptxy-dist").value);
+  const len = (typed > 0) ? typed : xyDir.len;       // 数値を入れていればその長さで見せる
+  const tip = { x: b.nd.x + xyDir.ux*len, y: b.nd.y + xyDir.uy*len };
+  const a = worldToScreen(b.nd), c = worldToScreen(tip);
+  const frag = document.createDocumentFragment();
+  frag.appendChild(mk("line", { x1:a.x, y1:a.y, x2:c.x, y2:c.y, class:"xy-line" }));
+  frag.appendChild(mk("rect", { x:c.x-4, y:c.y-4, width:8, height:8, class:"xy-tip" }));
+  const t = mk("text", { x:(a.x+c.x)/2, y:(a.y+c.y)/2 - 8, class:"xy-len", "text-anchor":"middle" });
+  t.textContent = "L:" + (Math.round(len*10)/10).toFixed(1);
+  frag.appendChild(t);
+  gHandles.appendChild(frag);
+}
 function renderGuides(){
   const list = project.guides || [];
   if (!list.length) return;
   const frag = document.createDocumentFragment();
-  const r = 5;
   for (const g of list){
     const s = worldToScreen(g);
-    const on = xyBase && xyBase.guideId===g.id;
-    frag.appendChild(mk("line", { x1:s.x-r, y1:s.y, x2:s.x+r, y2:s.y, class:"guide-pt"+(on?" on":"") }));
-    frag.appendChild(mk("line", { x1:s.x, y1:s.y-r, x2:s.x, y2:s.y+r, class:"guide-pt"+(on?" on":"") }));
-    frag.appendChild(mk("circle", { cx:s.x, cy:s.y, r:2, class:"guide-dot"+(on?" on":"") }));
+    const on = (selGuide===g.id) || (xyBase && xyBase.guideId===g.id);
+    frag.appendChild(mk("rect", { x:s.x-4, y:s.y-4, width:8, height:8,
+      class:"selpt"+(on?" on":""), "data-guide":g.id }));
   }
   gHandles.appendChild(frag);
 }
@@ -1793,7 +1808,8 @@ function render(){
   renderShapePreview();// rectangle/ellipse preview
   renderSelection();   // appends the 選択-tool overlay onto gHandles
   renderMeasure();     // 計測の重ね表示
-  renderGuides();      // 目印の点
+  renderGuides();      // 座標で足した点
+  renderXYPreview();   // 座標で足す時の下書き
   renderSnapGuides();  // magnet guide lines/points
   // the parts list can't change mid-drag - skip the DOM rebuild for smoothness
   if (!suppressListRender && !selMove && !handleDrag && !penDrag && !textDrag && !marquee && !shapeDrag && !drag) renderPartList();
@@ -2130,7 +2146,7 @@ function updateHint(){
     : tool==="pt-toggle"
       ? " ・ 点をクリック＝角 ↔ 丸 を入れ替える"
     : tool==="pt-xy"
-      ? " ・ 基準の点をクリック → まっすぐな位置をクリック／↑↓←→ で距離を指定 ＝ 形を変えない目印の点が付きます（線を引くとここに吸着）"
+      ? " ・ ①基準の点をクリック → ②置きたい向きへマウスを動かす → ③距離を打ってEnter（打たずにクリックでもOK）"
       : " ・ 辺の足したい場所をクリック＝" + (tool==="pt-corner" ? "角の点を足す" : "丸い点を足す（形は変わりません）");
   } else if (tool==="fillet"){
     msg += " ・ 角をクリック（ドラッグで囲む＝複数 / Shift+クリックで足し引き）→ 上の半径で丸める";
@@ -2362,7 +2378,7 @@ function setTool(t){
   // 接円弧は「選んだ点に効かせる」ツールなので、選択ツールからの点の選択を引き継ぐ
   if (t!=="select" && t!=="fillet" && t.indexOf("pt-")!==0 && t!=="len"){ multiSel = []; marquee = null; selMove = null; }
   if (t!=="len" && t!=="rad") clearMeasure();
-  if (t!=="pt-xy") xyBase = null;
+  if (t!=="pt-xy"){ xyBase = null; xyDir = null; }
   if (t!=="select" && t!=="text") selTexts = [];
   document.querySelectorAll("button.tool").forEach(b=>b.classList.toggle("active", b.dataset.tool===t));
   // the 図形 (shape) button stands in for rect/ellipse
@@ -2485,6 +2501,13 @@ svg.addEventListener("mousedown", (e)=>{
     // 0) 拡大縮小ハンドル（選択範囲の枠）を最優先
     const rh = findResizeHandleAt(sp);
     if (rh){ beginScale(rh, wp); render(); return; }
+    // 0.5) 座標で足した点：普通の点と同じようにつかんで動かせる
+    const gh = findGuideAt(sp);
+    if (gh){
+      selGuide = gh.id;
+      guideDrag = { id:gh.id, ox:gh.x, oy:gh.y, startW:wp };
+      render(); return;
+    }
     // 1) ベジェハンドル：曲線の曲がり具合を調整
     const h = findHandleAt(sp);
     if (h && !e.shiftKey){
@@ -2588,7 +2611,7 @@ svg.addEventListener("mousedown", (e)=>{
       render(); return;
     }
     // 7) 空き：範囲選択
-    multiSel = []; selectedPartId = null; selVertex = null; selMode = "points"; selTexts = [];
+    multiSel = []; selectedPartId = null; selVertex = null; selMode = "points"; selTexts = []; selGuide = null;
     marquee = { x0:sp.x, y0:sp.y, x1:sp.x, y1:sp.y };
     render(); return;
   }
@@ -2804,6 +2827,27 @@ svg.addEventListener("mousemove", (e)=>{
     renderThrottled();
     return;
   }
+  // 座標で足す：基準が決まっていたら、マウスの向きと長さを追う
+  if (tool==="pt-xy"){
+    const b = xyBaseNode();
+    if (b){
+      const dx = mouseWorld.x - b.nd.x, dy = mouseWorld.y - b.nd.y;
+      // 水平／垂直のうち、動かした量が多い方に合わせる
+      if (Math.abs(dx) >= Math.abs(dy)) xyDir = { ux: dx<0?-1:1, uy:0, len: Math.abs(dx) };
+      else                              xyDir = { ux:0, uy: dy<0?-1:1, len: Math.abs(dy) };
+      renderThrottled();
+    }
+  }
+  // 座標で足した点を動かす
+  if (guideDrag){
+    const g = (project.guides||[]).find(q=>q.id===guideDrag.id);
+    if (g){
+      const t = maybeSnap({ x: guideDrag.ox + (mouseWorld.x - guideDrag.startW.x),
+                            y: guideDrag.oy + (mouseWorld.y - guideDrag.startW.y) });
+      g.x = t.x; g.y = t.y; renderThrottled();
+    }
+    return;
+  }
   // Moving a text label
   if (textDrag){
     const t = project.texts.find(x=>x.id===textDrag.id);
@@ -2870,6 +2914,7 @@ window.addEventListener("mouseup", (e)=>{
   // Only act when a canvas gesture was actually in progress. Without this, a plain
   // click in the sidebar also ran render(), rebuilding the parts list and destroying
   // the input the user just clicked (and cancelling a row drag).
+  if (guideDrag){ guideDrag = null; saveLocal(); commitGesture(); render(); return; }
   if (!textDrag && !shapeDrag && !drag && !handleDrag && !selMove &&
       !penDrag && !panning && !marquee && gestureSnap === null) return;
   // finish a text drag: a click (no move) opens the editor; a drag commits the move
@@ -3181,6 +3226,12 @@ window.addEventListener("keydown", (e)=>{
     if (e.key==="Escape"){ e.preventDefault(); closePrintDialog(); }
     return;
   }
+  if (tool==="pt-xy" && e.key==="Enter"){ e.preventDefault(); ptxyPlace(); return; }
+  if (tool==="pt-xy" && /^[0-9.\-]$/.test(e.key) && xyBaseNode()){
+    // 数字を打ち始めたら、そのまま距離の欄に入る
+    const el = document.getElementById("ptxy-dist");
+    el.focus(); return;
+  }
   if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="p"){ e.preventDefault(); openPrintDialog(); return; }
   if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="z"){ e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="y"){ e.preventDefault(); redo(); return; }
@@ -3195,7 +3246,13 @@ window.addEventListener("keydown", (e)=>{
     if (map[k]){ e.preventDefault(); setTool(map[k]); return; }
   }
   const drawing = (tool==="draw"||tool==="stitch") && draft;
-  if (e.key==="Escape" && !drawing){ selectedPartId=null; multiSel=[]; selVertex=null; marquee=null; selTexts=[]; render(); }
+  if ((e.key==="Delete"||e.key==="Backspace") && tool==="select" && selGuide){
+    e.preventDefault(); pushUndo();
+    project.guides = project.guides.filter(g=>g.id!==selGuide);
+    if (xyBase && xyBase.guideId===selGuide) xyBase = null;
+    selGuide = null; saveLocal(); render(); return;
+  }
+  if (e.key==="Escape" && !drawing){ selectedPartId=null; multiSel=[]; selVertex=null; marquee=null; selTexts=[]; selGuide=null; render(); }
   if (drawing){
     if (e.key==="Enter") commitDraft();
     else if (e.key==="Escape") cancelDraft();
@@ -3486,17 +3543,24 @@ document.getElementById("btn-meas-label").addEventListener("click", ()=>{
   saveLocal(); render();
 });
 
-// ----- 座標で足す：上下左右のボタン -----
-function ptxyStep(dx, dy){
+// ----- 座標で足す：マウスで向き、数値で距離 -----
+// 向きはマウスが示した方向（水平か垂直）。距離は入力した数値。
+// 数値にマイナスを入れれば反対向きにもできる。
+function ptxyPlace(){
   const b = xyBaseNode();
   if (!b){ alert("先に、基準にする点をクリックしてください。"); return; }
-  const d = Math.max(0.1, parseFloat(document.getElementById("ptxy-dist").value)||100);
-  addGuideAt(b.nd.x + dx*d, b.nd.y + dy*d);
+  if (!xyDir){ alert("置きたい向きへマウスを動かしてから決めてください。"); return; }
+  const el = document.getElementById("ptxy-dist");
+  const v = parseFloat(el.value);
+  const d = (v || v===0) ? v : xyDir.len;            // 未入力ならマウスの位置そのまま
+  addGuideAt(b.nd.x + xyDir.ux*d, b.nd.y + xyDir.uy*d);
+  el.value = "";                                     // 次に備えて空にする
 }
-document.getElementById("ptxy-up").addEventListener("click", ()=>ptxyStep(0,-1));
-document.getElementById("ptxy-down").addEventListener("click", ()=>ptxyStep(0,1));
-document.getElementById("ptxy-left").addEventListener("click", ()=>ptxyStep(-1,0));
-document.getElementById("ptxy-right").addEventListener("click", ()=>ptxyStep(1,0));
+document.getElementById("ptxy-go").addEventListener("click", ptxyPlace);
+document.getElementById("ptxy-dist").addEventListener("keydown", (e)=>{
+  if (e.key==="Enter"){ e.preventDefault(); ptxyPlace(); }
+});
+document.getElementById("ptxy-dist").addEventListener("input", ()=>{ if (tool==="pt-xy") render(); });
 
 // ----- 曲線の腕：連動 / 片側ずつ -----
 document.getElementById("btn-mirror").addEventListener("click", ()=>{
