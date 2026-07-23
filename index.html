@@ -645,8 +645,9 @@
       オレンジ●（辺の中央）をドラッグして辺ごと動かす／Shift+クリックで点を足す／Delete で点を消す／
       ⌒接円弧で角を丸める、が全部使えます。
       穴のふちの点を全部消すと、その穴だけが無くなります。</p>
-      <p>曲線は自動で曲線のまま復元されます。ズレは0.1mm程度なので、寸法に影響はありません。
-      思ったとおりにならなかったら ⌘Z で戻せます。</p>
+      <p>曲線は<b>曲線のまま、少ない点で</b>作り直されます。
+      たとえば角丸のパーツを切ると22点ほど、円を半分に切ると6点ほどで、あとから形を直しやすい状態です。
+      ズレは0.1mm程度なので寸法に影響はありません。思ったとおりにならなかったら ⌘Z で戻せます。</p>
 
       <h3>画面を動かす</h3>
       <ul>
@@ -1346,21 +1347,22 @@ function booleanSelection(op){
   }
 
   pushUndo();
-  // 0.25mm まではズレを許して点を減らす（曲線はこのあと復元されるので、実際のズレは0.1mm程度）
-  const simple = rings.map(r=>simplifyRing(r, 0.25));
+  // 点は間引かず、細かいままベジェ曲線を当てはめる（そのほうが少ない点で正確になる）。
+  // 0.15mm はズレの上限。布を裁つ精度から見れば十分すぎる細かさ。
+  const FIT_TOL = 0.15;
   // 大きい輪が外側、その中に入っている輪は「穴」
-  const withArea = simple.map(r=>({ r, a: Math.abs(ringArea(r)) })).sort((x,y)=>y.a-x.a);
+  const withArea = rings.map(r=>({ r, a: Math.abs(ringArea(r)) })).sort((x,y)=>y.a-x.a);
   const outer = withArea[0].r;
   const isHole = (r)=> pointInRing(r[0], outer) && r !== outer;
 
   // 外側の輪＝パーツの形、その中に入っている輪＝そのパーツの「穴」。
   // 穴を別のパーツにすると、パーツを動かした時に置き去りになるので、パーツ自身に持たせる。
   const outers = withArea.filter(w=>!isHole(w.r));
-  const holeRings = withArea.filter(w=>isHole(w.r)).map(w=>ringToNodes(ringCCW(w.r)));
+  const holeRings = withArea.filter(w=>isHole(w.r)).map(w=>ringToNodes(ringCCW(w.r), FIT_TOL));
   const at = project.parts.indexOf(base);
   const made = [];
   outers.forEach((w, k)=>{
-    const nodes = ringToNodes(ringCCW(w.r));
+    const nodes = ringToNodes(ringCCW(w.r), FIT_TOL);
     let p;
     if (k === 0){                       // 1つめは元のパーツを作り替える（名前も色もそのまま）
       p = base;
@@ -2232,23 +2234,187 @@ function simplifyRing(ring, tol){
   const out = ring.filter((_,i)=>keep[i]);
   return out.length >= 3 ? out : ring;
 }
-// 折れ線をパーツの点に戻す。角の印が付いていない点は「丸い点」にして、曲線をよみがえらせる
-function ringToNodes(ring){
-  const nodes = ring.map(p=>({ x:p.x, y:p.y, hIn:null, hOut:null }));
-  for (let i=0;i<nodes.length;i++){
-    if (ring[i]._corner) continue;              // 角はとがったまま
-    const t = autoHandle(nodes, i, true);
-    nodes[i].hOut = { x:t.x, y:t.y };
-    nodes[i].hIn  = { x:-t.x, y:-t.y };
+// ===== 折れ線に曲線を当てはめ直す =====
+// ただ点を間引くだけだと、曲線をなぞるのに点が何十個も要る。
+// そうではなく「この一続きの曲線を、ベジェ曲線何本で表せるか」を計算して当てはめる。
+// こうすると、四分の一円ならベジェ1本＝点2つで、しかも元より正確に表せる。
+// （Schneider の曲線当てはめ。まず1本で試し、ズレが大きい所で切って、また試す）
+const vsub=(a,b)=>({x:a.x-b.x, y:a.y-b.y});
+const vadd=(a,b)=>({x:a.x+b.x, y:a.y+b.y});
+const vmul=(a,s)=>({x:a.x*s, y:a.y*s});
+const vdot=(a,b)=>a.x*b.x+a.y*b.y;
+function vnorm(a){ const l=Math.hypot(a.x,a.y); return l<1e-12?{x:0,y:0}:{x:a.x/l,y:a.y/l}; }
+function bezPt(b,t){
+  const mt=1-t;
+  return { x: mt*mt*mt*b[0].x + 3*mt*mt*t*b[1].x + 3*mt*t*t*b[2].x + t*t*t*b[3].x,
+           y: mt*mt*mt*b[0].y + 3*mt*mt*t*b[1].y + 3*mt*t*t*b[2].y + t*t*t*b[3].y };
+}
+// 点の並びを、道のりの長さで 0〜1 に割りふる
+function chordParams(pts){
+  const u=[0];
+  for (let i=1;i<pts.length;i++) u.push(u[i-1] + Math.hypot(pts[i].x-pts[i-1].x, pts[i].y-pts[i-1].y));
+  const L=u[u.length-1] || 1;
+  return u.map(v=>v/L);
+}
+// 両端の向き（接線）を決め打ちにして、真ん中の形を最小二乗で合わせる
+function fitOne(pts, u, t1, t2){
+  const n=pts.length, A=[];
+  for (let i=0;i<n;i++){
+    const t=u[i], mt=1-t;
+    A.push([ vmul(t1, 3*mt*mt*t), vmul(t2, 3*mt*t*t) ]);
+  }
+  let c00=0,c01=0,c11=0,x0=0,x1=0;
+  for (let i=0;i<n;i++){
+    c00 += vdot(A[i][0],A[i][0]);
+    c01 += vdot(A[i][0],A[i][1]);
+    c11 += vdot(A[i][1],A[i][1]);
+    const t=u[i], mt=1-t;
+    const base = vadd(vadd(vmul(pts[0], mt*mt*mt + 3*mt*mt*t), vmul(pts[n-1], 3*mt*t*t + t*t*t)), {x:0,y:0});
+    const tmp = vsub(pts[i], base);
+    x0 += vdot(A[i][0], tmp);
+    x1 += vdot(A[i][1], tmp);
+  }
+  const det = c00*c11 - c01*c01;
+  let a1, a2;
+  if (Math.abs(det) > 1e-12){
+    a1 = (x0*c11 - x1*c01)/det;
+    a2 = (c00*x1 - c01*x0)/det;
+  } else { a1 = a2 = 0; }
+  const seg = Math.hypot(pts[n-1].x-pts[0].x, pts[n-1].y-pts[0].y);
+  if (!(a1 > 1e-6) || !(a2 > 1e-6)) { a1 = a2 = seg/3; }      // うまく解けない時は無難な長さで
+  // 腕が長くなりすぎると、点と点の間で曲線が大きく膨らんでしまう。ほどほどに抑える。
+  const cap = seg * 1.5;
+  a1 = Math.min(a1, cap); a2 = Math.min(a2, cap);
+  return [ pts[0], vadd(pts[0], vmul(t1,a1)), vadd(pts[n-1], vmul(t2,a2)), pts[n-1] ];
+}
+// 折れ線までの最短距離
+function polyDist(p, pts){
+  let m = Infinity;
+  for (let i=0;i<pts.length-1;i++){ const d = distPtSeg(p, pts[i], pts[i+1]); if (d < m) m = d; }
+  return m;
+}
+// 当てはまり具合を測る。点の所だけ見ると、点と点の「間」で曲線が膨らんでいても
+// 気づけずに合格にしてしまう。曲線側からも細かく見て、両方の大きいほうを採る。
+function maxFitError(pts, u, bez){
+  let max=0, at=Math.floor(pts.length/2);
+  for (let i=1;i<pts.length-1;i++){
+    const p=bezPt(bez,u[i]);
+    const d=Math.hypot(p.x-pts[i].x, p.y-pts[i].y);
+    if (d>max){ max=d; at=i; }
+  }
+  const steps = Math.min(120, Math.max(24, pts.length*2));
+  for (let k=1;k<steps;k++){
+    const t = k/steps;
+    const p = bezPt(bez, t);
+    const d = polyDist(p, pts);
+    if (d > max){
+      max = d;
+      at = Math.max(1, Math.min(pts.length-2, Math.round(t*(pts.length-1))));
+    }
+  }
+  return { max, at };
+}
+// 割りふりを少しずつ直して、当てはまりを良くする（ニュートン法）
+function reparam(pts, u, bez){
+  return u.map((t,i)=>{
+    const mt=1-t;
+    const d1=[vmul(vsub(bez[1],bez[0]),3), vmul(vsub(bez[2],bez[1]),3), vmul(vsub(bez[3],bez[2]),3)];
+    const d2=[vmul(vsub(d1[1],d1[0]),2), vmul(vsub(d1[2],d1[1]),2)];
+    const q  = bezPt(bez,t);
+    const q1 = vadd(vadd(vmul(d1[0],mt*mt), vmul(d1[1],2*mt*t)), vmul(d1[2],t*t));
+    const q2 = vadd(vmul(d2[0],mt), vmul(d2[1],t));
+    const diff = vsub(q, pts[i]);
+    const den = vdot(q1,q1) + vdot(diff,q2);
+    if (Math.abs(den) < 1e-12) return t;
+    return Math.max(0, Math.min(1, t - vdot(diff,q1)/den));
+  });
+}
+function fitSpan(pts, t1, t2, tol, depth){
+  const n = pts.length;
+  if (n < 2) return [];
+  if (n === 2){
+    const d = Math.hypot(pts[1].x-pts[0].x, pts[1].y-pts[0].y)/3;
+    return [[ pts[0], vadd(pts[0], vmul(t1,d)), vadd(pts[1], vmul(t2,d)), pts[1] ]];
+  }
+  let u = chordParams(pts);
+  let bez = fitOne(pts, u, t1, t2);
+  let err = maxFitError(pts, u, bez);
+  if (err.max <= tol) return [bez];
+  if (depth < 14){
+    for (let k=0;k<6 && err.max <= tol*8; k++){       // 惜しい時は割りふりを直して粘る
+      u = reparam(pts, u, bez);
+      bez = fitOne(pts, u, t1, t2);
+      err = maxFitError(pts, u, bez);
+      if (err.max <= tol) return [bez];
+    }
+  }
+  if (depth >= 14) return [bez];                      // 念のための止め
+  // ズレが一番大きい所で切って、左右それぞれに当てはめる
+  const at = Math.max(1, Math.min(n-2, err.at));
+  const tc = vnorm(vsub(pts[at-1], pts[at+1]));
+  return fitSpan(pts.slice(0, at+1), t1, tc, tol, depth+1)
+    .concat(fitSpan(pts.slice(at), vmul(tc,-1), t2, tol, depth+1));
+}
+// 一続きの点（角から角まで）を、ベジェ曲線の並びにする
+function fitPolyline(pts, tol){
+  if (pts.length < 2) return [];
+  // まっすぐなら曲線にしない（腕の無い、きれいな直線にする）
+  let straight = true;
+  for (let i=1;i<pts.length-1;i++){
+    if (distPtSeg(pts[i], pts[0], pts[pts.length-1]) > tol){ straight = false; break; }
+  }
+  if (straight) return [[ pts[0], null, null, pts[pts.length-1] ]];
+  const t1 = vnorm(vsub(pts[1], pts[0]));
+  const t2 = vnorm(vsub(pts[pts.length-2], pts[pts.length-1]));
+  return fitSpan(pts, t1, t2, tol, 0);
+}
+// 折れ線をパーツの点に戻す。角で区切って、その間ごとに曲線を当てはめる。
+function ringToNodes(ring, tol){
+  tol = tol || 0.15;
+  const n = ring.length;
+  if (n < 3) return ring.map(p=>({ x:p.x, y:p.y, hIn:null, hOut:null }));
+  const corners = [];
+  for (let i=0;i<n;i++) if (ring[i]._corner) corners.push(i);
+  const cubics = [];
+  if (corners.length <= 1){
+    // 角が1つも無い（まんまる／角丸だけの形）。どこか1点を切れ目にして、
+    // 一周ぐるりを「ひと続きの曲線」として当てはめる。
+    // 切れ目の向きは前後の点から出して、そこだけ折れて見えないようにする。
+    const s = corners.length ? corners[0] : 0;
+    const pts = [];
+    for (let k=0;k<=n;k++) pts.push({ x:ring[(s+k)%n].x, y:ring[(s+k)%n].y });
+    const t1 = vnorm(vsub(ring[(s+1)%n], ring[(s-1+n)%n]));
+    cubics.push(...fitSpan(pts, t1, vmul(t1,-1), tol, 0));
+  } else {
+    for (let c=0;c<corners.length;c++){
+      const s = corners[c], e = corners[(c+1)%corners.length];
+      const pts = [];
+      for (let i=s;;i=(i+1)%n){ pts.push({x:ring[i].x, y:ring[i].y}); if (i===e) break; }
+      if (pts.length >= 2) cubics.push(...fitPolyline(pts, tol));
+    }
+  }
+  if (!cubics.length) return ring.map(p=>({ x:p.x, y:p.y, hIn:null, hOut:null }));
+  // ベジェの並びを、パーツの点（前後の腕つき）に組み直す
+  const nodes = [];
+  for (let i=0;i<cubics.length;i++){
+    const cur = cubics[i], prev = cubics[(i-1+cubics.length)%cubics.length];
+    const p = cur[0];
+    nodes.push({ x:p.x, y:p.y,
+      hIn:  prev[2] ? { x: prev[2].x - p.x, y: prev[2].y - p.y } : null,
+      hOut: cur[1]  ? { x: cur[1].x  - p.x, y: cur[1].y  - p.y } : null });
   }
   return nodes;
 }
 
+// 曲線の長さ。細かく刻んで足すほど本当の長さに近づく。
+// 辺のラベルと周長ツールで刻み方が違うと、同じ辺なのに数字が食い違うので、
+// どちらもこの ARC_STEPS を使う。
+const ARC_STEPS = 64;
 function segArcLength(nodes, i, closed){
   const seg = segControls(nodes, i, closed);
   if (seg.straight) return dist(seg.A, seg.B);
   let L = 0, prev = seg.A;
-  for (let t=1;t<=24;t++){ const p = bezierAt(seg, t/24); L += dist(prev, p); prev = p; }
+  for (let t=1;t<=ARC_STEPS;t++){ const p = bezierAt(seg, t/ARC_STEPS); L += dist(prev, p); prev = p; }
   return L;
 }
 function segMidWorld(nodes, i, closed){
@@ -2331,7 +2497,7 @@ function drawDimension(frag, part){
     addArrowHead(frag, sb, sa, col, 9);
   }
   // 数値。計測の書き込みは測った値のまま、寸法線ツールは2点間の長さを出す
-  const label = part.mlabel || (Math.round(L) + "mm");
+  const label = part.mlabel || fmtMM(L);
   const mid = { x:(A2.x+B2.x)/2, y:(A2.y+B2.y)/2 };
   const sm = worldToScreen({ x:mid.x+px*3.5, y:mid.y+py*3.5 });
   const t = mk("text", { x:sm.x, y:sm.y, class:"dimtext", fill:col, "text-anchor":"middle" });
@@ -2472,6 +2638,45 @@ function findOutlineSpotWorld(wp){
     });
   }
   return best.d < thr ? best : null;
+}
+// 座標で点を足すとき用。「基準から横に100mm」なら、X=基準X+100 という
+// まっすぐな線を引いて、それが輪郭と交わる場所を探す。
+// 前は「そこに一番近い輪郭の場所」に落としていたので、斜めの辺だと
+// 打った数字（100）と実際の距離（70.7など）がずれていた。
+// 交点にすれば、打った数字がそのまま座標の差になる。
+function findOutlineCrossing(base, ux, uy, d, preferPartId){
+  const tx = base.x + ux*d, ty = base.y + uy*d;
+  const vertical = (ux !== 0);            // 横に指定 → 縦の線 X=tx と交わる所を探す
+  let best = null;
+  const scan = (part)=>{
+    if (part.kind || part.nodes.length < 2) return;
+    const fi = flattenNodesIndexed(part.nodes, part.closed, 64);
+    const pts = fi.pts;
+    fi.range.forEach((rg, i)=>{
+      const end = (rg.end===0 && part.closed) ? pts.length : rg.end;
+      const count = end - rg.start;
+      for (let k=rg.start; k<end; k++){
+        const a = pts[k], b = pts[(k+1)%pts.length];
+        const va = vertical ? a.x-tx : a.y-ty;
+        const vb = vertical ? b.x-tx : b.y-ty;
+        if ((va > 0 && vb > 0) || (va < 0 && vb < 0)) continue;   // 線をまたいでいない
+        const den = va - vb;
+        const u = Math.abs(den) < 1e-12 ? 0 : va/den;
+        if (u < -1e-9 || u > 1+1e-9) continue;
+        const pt = { x: a.x + (b.x-a.x)*u, y: a.y + (b.y-a.y)*u };
+        // 基準から遠すぎる交点（パーツの反対側など）は選ばない
+        const along = vertical ? (pt.y - base.y) : (pt.x - base.x);
+        const score = Math.abs(along) + (part.id===preferPartId ? 0 : 1e6);
+        if (!best || score < best.score){
+          best = { score, part, i, t:(k-rg.start+u)/count, pt };
+        }
+      }
+    });
+  };
+  const pref = project.parts.find(p=>p.id===preferPartId);
+  if (pref) scan(pref);                    // 基準と同じパーツを優先して探す
+  if (!best) for (const part of project.parts) if (part.id!==preferPartId) scan(part);
+  return best;
 }
 // 辺のどこを押したか（パーツ・辺の番号・辺の中での位置0〜1）を返す
 function findEdgeSpot(sp){
@@ -2836,9 +3041,11 @@ function renderXYPreview(){
   if (!b || !xyDir) return;
   const typed = parseFloat(document.getElementById("ptxy-dist").value);
   const len = (typed > 0) ? typed : xyDir.len;       // 数値を入れていればその長さで見せる
-  const tip = { x: b.nd.x + xyDir.ux*len, y: b.nd.y + xyDir.uy*len };
+  // 実際に置かれる場所（線との交点）をそのまま見せる。押す前と後で位置が変わらないように。
+  const cross = findOutlineCrossing(b.nd, xyDir.ux, xyDir.uy, len, b.part ? b.part.id : null);
+  const tip = cross ? cross.pt : { x: b.nd.x + xyDir.ux*len, y: b.nd.y + xyDir.uy*len };
   const a = worldToScreen(b.nd), c = worldToScreen(tip);
-  const onLine = !!findOutlineSpotWorld(tip);      // そこに置けるか
+  const onLine = !!cross;                          // そこに置けるか
   const frag = document.createDocumentFragment();
   frag.appendChild(mk("line", { x1:a.x, y1:a.y, x2:c.x, y2:c.y, class:"xy-line"+(onLine?"":" off") }));
   frag.appendChild(mk("rect", { x:c.x-4, y:c.y-4, width:8, height:8, class:"xy-tip"+(onLine?"":" off") }));
@@ -3159,7 +3366,7 @@ function renderParts(){
         const mid = worldToScreen(midW);
         let ox = midW.x - c.x, oy = midW.y - c.y; const ol = Math.hypot(ox,oy)||1;
         const t = mk("text", { x: mid.x + ox/ol*12, y: mid.y + oy/ol*12, class:"edge-len", "text-anchor":"middle", "dominant-baseline":"middle" });
-        t.textContent = Math.round(len) + "";
+        t.textContent = fmtMM(len).replace("mm","");
         pg.appendChild(t);
       }
     }
@@ -5116,14 +5323,14 @@ document.getElementById("btn-meas-label").addEventListener("click", ()=>{
   if (measure.kind==="rad"){
     // アール：中心から円弧へ引いた線に R○○ と入れる
     const p = { id, kind:"mdim", meas:true, color:col, closed:false, name:"", qty:1, fabric:"",
-      seam:0, stitch:0, group:null, notches:[], mlabel:"R"+Math.round(measure.value), moff:0, mone:true,
+      seam:0, stitch:0, group:null, notches:[], mlabel:"R"+fmtMM(measure.value).replace("mm",""), moff:0, mone:true,
       nodes:[ {x:measure.c.x, y:measure.c.y, hIn:null, hOut:null},
               {x:measure.mid.x, y:measure.mid.y, hIn:null, hOut:null} ] };
     project.parts.push(p);
   } else if (measure.kind==="dist"){
     // 直線距離：2点をそのまま結ぶ寸法線（引き出し線なし）
     const p = { id, kind:"mdim", meas:true, color:col, closed:false, name:"", qty:1, fabric:"",
-      seam:0, stitch:0, group:null, notches:[], mlabel:Math.round(measure.value)+"mm", moff:0,
+      seam:0, stitch:0, group:null, notches:[], mlabel:fmtMM(measure.value), moff:0,
       nodes:[ {x:measure.a.x, y:measure.a.y, hIn:null, hOut:null},
               {x:measure.b.x, y:measure.b.y, hIn:null, hOut:null} ] };
     project.parts.push(p);
@@ -5147,7 +5354,7 @@ document.getElementById("btn-meas-label").addEventListener("click", ()=>{
       pos = ((A.x+B.x)/2 <= cx) ? Math.min(...xs)-25 : Math.max(...xs)+25;
     }
     const p = { id, kind:"mdim", meas:true, color:col, closed:false, name:"", qty:1, fabric:"",
-      seam:0, stitch:0, group:null, notches:[], mlabel:Math.round(measure.value)+"mm",
+      seam:0, stitch:0, group:null, notches:[], mlabel:fmtMM(measure.value),
       maxis:axis, mpos:pos,
       nodes:[ {x:A.x, y:A.y, hIn:null, hOut:null}, {x:B.x, y:B.y, hIn:null, hOut:null} ] };
     project.parts.push(p);
@@ -5267,7 +5474,22 @@ function ptxyPlace(){
   const el = document.getElementById("ptxy-dist");
   const v = parseFloat(el.value);
   const d = (v || v===0) ? v : xyDir.len;            // 未入力ならマウスの位置そのまま
-  addGuideAt(b.nd.x + xyDir.ux*d, b.nd.y + xyDir.uy*d);
+  // 打った数字ぶん離れた所を通る線と、輪郭の交点に置く。
+  // これで「基準から横に100mm」が、そのまま座標の差100mmになる。
+  const cross = findOutlineCrossing(b.nd, xyDir.ux, xyDir.uy, d, b.part ? b.part.id : null);
+  if (!cross){ xyMissHint(); return; }
+  pushUndo();
+  if (insertNodeOnSegment(cross.part, cross.i, cross.t)){
+    const at = cross.i + 1;
+    // 分割の計算で出た位置と、狙った線がわずかにずれることがあるので、きっちり合わせる
+    const nd = cross.part.nodes[at];
+    if (xyDir.ux !== 0) nd.x = b.nd.x + xyDir.ux*d;
+    else                nd.y = b.nd.y + xyDir.uy*d;
+    xyBase = { partId: cross.part.id, idx: at };
+    selectedPartId = cross.part.id; selVertex = { partId:cross.part.id, idx:at };
+    multiSel = [{ partId:cross.part.id, idx:at }];
+    saveLocal(); render();
+  }
   el.value = "";                                     // 次に備えて空にする
 }
 document.getElementById("ptxy-go").addEventListener("click", ptxyPlace);
