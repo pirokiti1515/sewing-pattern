@@ -625,15 +625,26 @@
       <p>グループ化したものは 🔗 の行にまとまり、名前を付けたり、まとめて表示・非表示にしたり、⛓ で解除したりできます。</p>
 
       <h3>⊖ 切り抜く（パーツの足し引き）</h3>
-      <p>パーツを<b>2つ選ぶ</b>と、上のバーに ⊖ ⊗ ⊕ が出ます（右クリックからも選べます）。</p>
+      <p>パーツを<b>2枚選ぶ</b>と、上のバーに ⊖ ⊗ ⊕ が出ます（右クリックからも選べます）。</p>
+      <p><b>2枚の選び方</b>：1枚をクリック → もう1枚を <b>⌘+クリック</b>（Windowsは Ctrl+クリック）。
+      何もない所からドラッグして囲んでもかまいません。ステッチ線などが一緒に選ばれていても大丈夫です。</p>
       <ul>
         <li><b>⊖ 切り抜く</b> … 上にあるパーツの形で、下のパーツを抜きます</li>
         <li><b>⊗ 重なった所だけ残す</b> … 2枚が重なっている部分だけにします</li>
         <li><b>⊕ 1枚につなげる</b> … 2枚を1枚の形にします</li>
       </ul>
-      <p>刃にしたパーツ（上にあるほう）は消えます。名前・色・ステッチは下のパーツのものが残ります。</p>
-      <p>切った結果が<b>2枚に分かれた</b>ときは、そのまま2枚のパーツになります（名前に「（分かれ）」が付きます）。
-      真ん中をくり抜いて<b>穴</b>になったときは、穴も1つのパーツになります（名前に「（穴）」、塗りなし）。</p>
+      <p>刃にしたパーツ（上にあるほう）は消えます。名前・色・ステッチは下のパーツのものが残ります。
+      ただし<b>片方がもう片方の中にすっぽり入っている</b>ときは、上下に関わらず
+      「大きいほうから小さいほうを抜く」形になります（そうしないと全部消えてしまうため）。</p>
+      <p>切った結果が<b>2枚に分かれた</b>ときは、そのまま2枚のパーツになります（名前に「（分かれ）」が付きます）。</p>
+      <p>真ん中をくり抜いた<b>穴</b>は、そのパーツの一部になります。中が本当に抜けて下が透けて見え、
+      パーツを動かす・回す・反転する・拡大する・複製すると<b>穴も一緒についてきます</b>。
+      穴をやめたいときは右クリックの「⬜ 穴を埋める」で消せます。</p>
+      <p><b>穴の形も、外枠とまったく同じように変えられます。</b>
+      白い■をドラッグ／ダブルクリックで角↔曲線／曲線の腕（オレンジ）をドラッグ／
+      オレンジ●（辺の中央）をドラッグして辺ごと動かす／Shift+クリックで点を足す／Delete で点を消す／
+      ⌒接円弧で角を丸める、が全部使えます。
+      穴のふちの点を全部消すと、その穴だけが無くなります。</p>
       <p>曲線は自動で曲線のまま復元されます。ズレは0.1mm程度なので、寸法に影響はありません。
       思ったとおりにならなかったら ⌘Z で戻せます。</p>
 
@@ -942,9 +953,30 @@ function makeSelMove(wp, list, textIds){
   if (textIds === undefined) console.warn("makeSelMove: textIds を渡してください");
   const ids = (textIds !== undefined) ? textIds : [];
   return { startW: wp,
-    orig: list.map(m=>{ const nd=nodeOf(m); return { partId:m.partId, idx:m.idx, x:nd.x, y:nd.y }; }),
+    // hole（どの穴の点か）を必ず持ち回ること。落とすと外枠の同じ番号の点が動いてしまう。
+    orig: list.map(m=>{ const nd=nodeOf(m); return { partId:m.partId, idx:m.idx, hole:m.hole, x:nd.x, y:nd.y }; }),
     origTexts: ids.map(id=>{ const t=project.texts.find(x=>x.id===id); return t?{id, x:t.x, y:t.y}:null; }).filter(Boolean),
-    origNotches: captureNotches(list) };
+    origNotches: captureNotches(list),
+    origHoles: captureHoles(list) };
+}
+// 穴はパーツの一部。パーツをまるごと動かすときは、穴も同じだけ動かす。
+// （点を1つだけ動かしている時は動かさない）
+function captureHoles(list){
+  const out = [];
+  for (const pid of new Set((list||[]).map(m=>m.partId))){
+    const p = project.parts.find(q=>q.id===pid);
+    if (!p || !hasHoles(p)) continue;
+    const picked = (list||[]).filter(m=>m.partId===pid && !isHoleSel(m)).length;
+    if (picked < p.nodes.length) continue;                  // 外枠がまるごと選ばれている時だけ
+    // 穴の点も個別に選ばれている時は、そちらで動くので二重に動かさない
+    if ((list||[]).some(m=>m.partId===pid && isHoleSel(m))) continue;
+    p.holes.forEach((h,hi)=>h.forEach((nd,ni)=>out.push({ partId:pid, hi, ni, x:nd.x, y:nd.y })));
+  }
+  return out;
+}
+function holeNodeOf(o){
+  const p = project.parts.find(q=>q.id===o.partId);
+  return (p && p.holes && p.holes[o.hi]) ? p.holes[o.hi][o.ni] : null;
 }
 // 動かしたパーツの合印を輪郭の上に貼り直す（形だけ変えた時のずれ止め）
 function resnapMovedNotches(list){
@@ -965,15 +997,19 @@ let selMode = "points";     // "part" = whole part picked, "points" = individual
 function findMidEdgeAt(sp, partId){
   const part = project.parts.find(p=>p.id===partId);
   if (!part || part.nodes.length<2) return null;
-  const n = part.nodes.length, segCount = part.closed ? n : n-1;
-  let best = { d: Infinity, i: -1 };
-  for (let i=0;i<segCount;i++){
-    const m = segMidWorld(part.nodes, i, part.closed);
-    const s = worldToScreen(m);
-    const d = Math.hypot(sp.x-s.x, sp.y-s.y);
-    if (d < best.d) best = { d, i };
-  }
-  return best.d < 11 ? { part, i: best.i } : null;
+  let best = { d: Infinity, i: -1, hole: undefined };
+  eachRing(part, (ring, hole)=>{                       // 外枠と、穴のふちの両方
+    if (ring.length < 2) return;
+    const closed = (hole===undefined) ? part.closed : true;
+    const n = ring.length, segCount = closed ? n : n-1;
+    for (let i=0;i<segCount;i++){
+      const m = segMidWorld(ring, i, closed);
+      const s = worldToScreen(m);
+      const d = Math.hypot(sp.x-s.x, sp.y-s.y);
+      if (d < best.d) best = { d, i, hole };
+    }
+  });
+  return best.d < 11 ? { part, i: best.i, hole: best.hole } : null;
 }
 let shapeDrag = null;       // {start:{x,y}} while dragging out a rectangle/ellipse
 let editingTextId = null;   // id of the text currently open in the inline editor
@@ -1088,18 +1124,39 @@ function textsInRect(x0,y0,x1,y1){
   }
   return res;
 }
+// 点の住所は {partId, idx} ＋ 穴なら hole:番号。
+// hole が無ければパーツの外枠、あればその穴の輪をさす。
+// これで外枠の点と穴の点を、同じ仕組みで選んだり動かしたりできる。
+function ringOfPart(part, hole){
+  if (hole===undefined || hole===null) return part.nodes;
+  return (part.holes && part.holes[hole]) || null;
+}
+function ringOf(m){
+  const p = project.parts.find(pp=>pp.id===m.partId);
+  return p ? ringOfPart(p, m.hole) : null;
+}
+const isHoleSel = (m)=> m.hole!==undefined && m.hole!==null;
+// 穴の輪をひとつずつ渡す（部品を書くときの決まり文句をまとめたもの）
+function eachRing(part, fn){
+  fn(part.nodes, undefined);
+  (part.holes||[]).forEach((h,hi)=>{ if (h && h.length) fn(h, hi); });
+}
 function pointsInRect(x0,y0,x1,y1){
   const xa=Math.min(x0,x1), xb=Math.max(x0,x1), ya=Math.min(y0,y1), yb=Math.max(y0,y1);
   const res=[];
   for (const part of project.parts){
-    part.nodes.forEach((nd,i)=>{
-      const s = worldToScreen(nd);
-      if (s.x>=xa && s.x<=xb && s.y>=ya && s.y<=yb) res.push({ partId:part.id, idx:i });
+    eachRing(part, (ring, hole)=>{
+      ring.forEach((nd,i)=>{
+        const s = worldToScreen(nd);
+        if (s.x>=xa && s.x<=xb && s.y>=ya && s.y<=yb){
+          res.push(hole===undefined ? { partId:part.id, idx:i } : { partId:part.id, idx:i, hole });
+        }
+      });
     });
   }
   return res;
 }
-function nodeOf(m){ const p = project.parts.find(pp=>pp.id===m.partId); return p ? p.nodes[m.idx] : null; }
+function nodeOf(m){ const r = ringOf(m); return r ? r[m.idx] : null; }
 function selCentroid(){
   let x=0,y=0,n=0; for (const m of multiSel){ const nd=nodeOf(m); if(nd){ x+=nd.x; y+=nd.y; n++; } }
   return n ? { x:x/n, y:y/n } : { x:0, y:0 };
@@ -1111,9 +1168,12 @@ function rotateSelection(deg){
   const rot=(p)=>({ x:c.x+(p.x-c.x)*cos-(p.y-c.y)*sin, y:c.y+(p.x-c.x)*sin+(p.y-c.y)*cos });
   const rotOff=(o)=> o?{ x:o.x*cos-o.y*sin, y:o.x*sin+o.y*cos }:null;
   for (const m of multiSel){ const nd=nodeOf(m); if(nd){ const p=rot(nd); nd.x=p.x; nd.y=p.y; nd.hIn=rotOff(nd.hIn); nd.hOut=rotOff(nd.hOut); } }
-  // 合印も一緒に回す
+  // 合印と穴も一緒に回す
   for (const part of wholePartsInSel()){
     if (part.notches) part.notches = part.notches.map(rot);
+    for (const h of (part.holes||[])) for (const nd of h){
+      const p=rot(nd); nd.x=p.x; nd.y=p.y; nd.hIn=rotOff(nd.hIn); nd.hOut=rotOff(nd.hOut);
+    }
     // 回すと左右対称の向きが変わるので、対称はいったん外す
     if (part.symAxis!==undefined){ delete part.symAxis; delete part.symPair; }
   }
@@ -1124,7 +1184,7 @@ function rotateSelection(deg){
 // 点が全部選ばれているパーツを返す（合印や文字も一緒に動かす対象）
 function wholePartsInSel(){
   const cnt = {};
-  for (const m of multiSel) cnt[m.partId] = (cnt[m.partId]||0) + 1;
+  for (const m of multiSel) if (!isHoleSel(m)) cnt[m.partId] = (cnt[m.partId]||0) + 1;
   const out = [];
   for (const pid in cnt){
     const p = project.parts.find(q=>q.id===pid);
@@ -1138,9 +1198,12 @@ function flipSelection(axis){
   const fp=(p)=> axis==="h" ? { x:2*c.x-p.x, y:p.y } : { x:p.x, y:2*c.y-p.y };
   const fo=(o)=> o ? (axis==="h" ? { x:-o.x, y:o.y } : { x:o.x, y:-o.y }) : null;
   for (const m of multiSel){ const nd=nodeOf(m); if(nd){ const p=fp(nd); nd.x=p.x; nd.y=p.y; nd.hIn=fo(nd.hIn); nd.hOut=fo(nd.hOut); } }
-  // 合印も一緒に反転する。置き去りにすると輪郭の別の場所へ移ってしまう。
+  // 合印と穴も一緒に反転する。置き去りにすると輪郭の別の場所へ移ってしまう。
   for (const part of wholePartsInSel()){
     if (part.notches) part.notches = part.notches.map(fp);
+    for (const h of (part.holes||[])) for (const nd of h){
+      const p=fp(nd); nd.x=p.x; nd.y=p.y; nd.hIn=fo(nd.hIn); nd.hOut=fo(nd.hOut);
+    }
     resyncSymAxis(part);
   }
   // 文字も（パーツごと反転しているので位置だけ合わせる）
@@ -1180,7 +1243,25 @@ function deleteSelection(){
   if (!multiSel.length && !selTexts.length) return; pushUndo();
   if (selTexts.length){ project.texts = project.texts.filter(t=>!selTexts.includes(t.id)); selTexts = []; }
   if (!multiSel.length){ selectedPartId=null; saveLocal(); render(); return; }
-  const byPart={}; for (const m of multiSel){ (byPart[m.partId]=byPart[m.partId]||[]).push(m.idx); }
+  // 穴のふちの点を先に消す。3点を切ったらその穴ごと無くす（穴として成り立たないため）。
+  const holeSel = multiSel.filter(isHoleSel);
+  if (holeSel.length){
+    const byHole = {};
+    for (const m of holeSel){ const k=m.partId+"/"+m.hole; (byHole[k]=byHole[k]||[]).push(m.idx); }
+    for (const k in byHole){
+      const [pid, hi] = k.split("/");
+      const part = project.parts.find(p=>p.id===pid); if (!part || !part.holes) continue;
+      const ring = part.holes[hi]; if (!ring) continue;
+      if (byHole[k].length >= ring.length - 2){ part.holes[hi] = null; continue; }   // 穴を無くす
+      byHole[k].sort((a,b)=>b-a).forEach(i=>{ if (ring.length>3) ring.splice(i,1); });
+    }
+    for (const p of project.parts) if (p.holes){
+      p.holes = p.holes.filter(h=>h && h.length>=3);
+      if (!p.holes.length) delete p.holes;
+    }
+  }
+  const byPart={};
+  for (const m of multiSel) if (!isHoleSel(m)) (byPart[m.partId]=byPart[m.partId]||[]).push(m.idx);
   for (const pid in byPart){
     const part=project.parts.find(p=>p.id===pid); if(!part) continue;
     if (byPart[pid].length >= part.nodes.length){ project.parts=project.parts.filter(p=>p.id!==pid); continue; }
@@ -1195,7 +1276,9 @@ function wholePartSelected(){
   const ids=[...new Set(multiSel.map(m=>m.partId))];
   if (ids.length!==1) return null;
   const part=project.parts.find(p=>p.id===ids[0]);
-  return (part && multiSel.length===part.nodes.length) ? part : null;
+  // 数えるのは外枠の点だけ。穴の点は「まるごと選んだか」の判断に混ぜない。
+  const outer = multiSel.filter(m=>!isHoleSel(m)).length;
+  return (part && outer===part.nodes.length) ? part : null;
 }
 // Group the parts referenced by the current selection under a shared group id.
 // 画面の下に、少しの間だけ出るお知らせ
@@ -1216,23 +1299,43 @@ function toast(msg){
 // 選んだ2つのパーツで、切り抜き・合体・重なりを行う。
 // 上にあるパーツ（あとから描いたほう）が「刃」になる — Affinity と同じ考え方。
 function booleanSelection(op){
-  const ids = [...new Set(multiSel.map(m=>m.partId))];
-  const parts = ids.map(id=>project.parts.find(p=>p.id===id)).filter(Boolean)
-    .filter(p=>!p.kind && p.closed && p.nodes.length >= 3);
-  if (parts.length !== 2){ toast("閉じたパーツを2つ選んでください"); return; }
+  const parts = boolParts();
+  if (!parts){
+    const n = [...new Set(multiSel.map(m=>m.partId))]
+      .map(id=>project.parts.find(p=>p.id===id))
+      .filter(p=>p && !p.kind && p.closed && p.nodes.length>=3).length;
+    toast(n<2 ? "布のパーツを2枚選んでください（⌘+クリックで足せます）"
+              : "布のパーツが"+n+"枚選ばれています。2枚にしてください");
+    return;
+  }
   // project.parts の並び順が前後関係。あとにあるほうが上＝刃
   parts.sort((a,b)=> project.parts.indexOf(a) - project.parts.indexOf(b));
-  const base = parts[0], cutter = parts[1];
+  let base = parts[0], cutter = parts[1];
 
-  const A = flattenNodes(base.nodes, true, 24);
-  const B = flattenNodes(cutter.nodes, true, 24);
+  let A = flattenNodes(base.nodes, true, 24);
+  let B = flattenNodes(cutter.nodes, true, 24);
+
+  // 片方がもう片方の中にすっぽり入っている場合、
+  // 「小さいほう」を刃にしないと全部消えてしまう（＝押しても何も起きない）。
+  // 上下の順番に関わらず、大きいほうから小さいほうを抜く形にそろえる。
+  let swapped = false;
+  if (op === "sub"){
+    const inside = (ring, other)=> ring.every(p=>pointInRing(p, other));
+    if (inside(A, B) && !inside(B, A)){
+      const t = base; base = cutter; cutter = t;
+      const tf = A; A = B; B = tf;
+      swapped = true;
+    }
+  }
+
   let rings;
   try { rings = ringBoolean(A, B, op); }
   catch(err){ toast("この形では計算できませんでした"); return; }
 
   if (!rings.length){
     toast(op==="and" ? "重なっている所がありません"
-        : op==="sub" ? "全部が切り取られてしまいます" : "計算できませんでした");
+        : op==="sub" ? "同じ形どうしなので、何も残りません"
+        : "計算できませんでした");
     return;
   }
   // 元の面積と比べて、何も起きていないなら知らせる（重なっていない時など）
@@ -1250,9 +1353,13 @@ function booleanSelection(op){
   const outer = withArea[0].r;
   const isHole = (r)=> pointInRing(r[0], outer) && r !== outer;
 
+  // 外側の輪＝パーツの形、その中に入っている輪＝そのパーツの「穴」。
+  // 穴を別のパーツにすると、パーツを動かした時に置き去りになるので、パーツ自身に持たせる。
+  const outers = withArea.filter(w=>!isHole(w.r));
+  const holeRings = withArea.filter(w=>isHole(w.r)).map(w=>ringToNodes(ringCCW(w.r)));
   const at = project.parts.indexOf(base);
   const made = [];
-  withArea.forEach((w, k)=>{
+  outers.forEach((w, k)=>{
     const nodes = ringToNodes(ringCCW(w.r));
     let p;
     if (k === 0){                       // 1つめは元のパーツを作り替える（名前も色もそのまま）
@@ -1265,13 +1372,19 @@ function booleanSelection(op){
       p.id = "p"+(idCounter++);
       p.nodes = nodes;
       p.notches = [];
-      p.name = base.name ? base.name + (isHole(w.r) ? "（穴）" : "（分かれ）") : "";
+      p.holes = [];
+      p.name = base.name ? base.name + "（分かれ）" : "";
       delete p.symAxis; delete p.symPair;
-      if (isHole(w.r)) p.fill = "none";  // 穴は塗らない（穴に見えるように）
       project.parts.splice(at + k, 0, p);
     }
     made.push(p);
   });
+  // 穴は、それを囲んでいるパーツにあずける
+  for (const h of holeRings){
+    const owner = made.find(p=>pointInRing(h[0], flattenNodes(p.nodes, true))) || made[0];
+    if (!owner.holes) owner.holes = [];
+    owner.holes.push(h);
+  }
   // 合印は、輪郭から離れてしまったものだけ落とす
   if (base.notches && base.notches.length){
     const flat = flattenNodes(base.nodes, true);
@@ -1290,10 +1403,13 @@ function booleanSelection(op){
   selVertex = null;
   saveLocal(); render();
 
-  const holes = withArea.filter(w=>isHole(w.r)).length;
-  const pieces = made.length - holes;
-  toast(op==="sub" ? `切り抜きました（${pieces}枚${holes?"・穴"+holes+"個":""}）`
-      : op==="and" ? "重なった所を残しました" : "合体しました");
+  const holes = holeRings.length;
+  const pieces = made.length;
+  const swapNote = swapped ? "（大きいほうから小さいほうを抜きました）" : "";
+  toast(op!=="sub" ? (op==="and" ? "重なった所を残しました" : "合体しました")
+      : holes ? `穴を${holes}個あけました${swapNote}`
+      : pieces>1 ? `切り抜いた結果、${pieces}枚に分かれました`
+      : `切り抜きました${swapNote}`);
 }
 
 function groupSelection(){
@@ -1403,10 +1519,12 @@ function beginScale(h, wp){
   const partIds = [...new Set(multiSel.map(m=>m.partId))];
   scaleDrag = {
     h, anchor:{ x:h.ax, y:h.ay }, from:{ x:h.x, y:h.y },
-    nodes: multiSel.map(m=>{ const nd=nodeOf(m); return { partId:m.partId, idx:m.idx, x:nd.x, y:nd.y,
+    nodes: multiSel.map(m=>{ const nd=nodeOf(m); return { partId:m.partId, idx:m.idx, hole:m.hole, x:nd.x, y:nd.y,
       hIn: nd.hIn?{...nd.hIn}:null, hOut: nd.hOut?{...nd.hOut}:null }; }),
     notches: partIds.flatMap(id=>{ const p=project.parts.find(pp=>pp.id===id);
       return (p&&p.notches)? p.notches.map((q,i)=>({partId:id, i, x:q.x, y:q.y})) : []; }),
+    holes: captureHoles(multiSel).map(o=>{ const nd=holeNodeOf(o);
+      return { ...o, hIn: nd&&nd.hIn?{...nd.hIn}:null, hOut: nd&&nd.hOut?{...nd.hOut}:null }; }),
     texts: selTexts.map(id=>{ const t=project.texts.find(x=>x.id===id); return t?{id, x:t.x, y:t.y, size:t.size||20}:null; }).filter(Boolean)
   };
 }
@@ -1432,6 +1550,12 @@ function applyScale(shift){
   for (const o of d.notches){
     const p = project.parts.find(pp=>pp.id===o.partId);
     if (p && p.notches && p.notches[o.i]){ p.notches[o.i].x = a.x+(o.x-a.x)*sx; p.notches[o.i].y = a.y+(o.y-a.y)*sy; }
+  }
+  for (const o of (d.holes||[])){                 // 穴もパーツと同じだけ伸び縮みさせる
+    const nd = holeNodeOf(o); if (!nd) continue;
+    nd.x = a.x + (o.x-a.x)*sx;  nd.y = a.y + (o.y-a.y)*sy;
+    nd.hIn  = o.hIn  ? { x:o.hIn.x*sx,  y:o.hIn.y*sy }  : null;
+    nd.hOut = o.hOut ? { x:o.hOut.x*sx, y:o.hOut.y*sy } : null;
   }
   const fs = (Math.abs(sx)+Math.abs(sy))/2;
   for (const o of d.texts){
@@ -1508,13 +1632,15 @@ function updateUndoButtons(){
 
 // Find the vertex nearest to a screen point (across all parts), within a pixel threshold.
 function findVertexAt(sp){
-  let best = { d: Infinity, part: null, idx: -1 };
+  let best = { d: Infinity, part: null, idx: -1, hole: undefined };
   for (const part of project.parts){
-    for (let i=0;i<part.nodes.length;i++){
-      const s = worldToScreen(part.nodes[i]);
-      const d = Math.hypot(sp.x - s.x, sp.y - s.y);
-      if (d < best.d) best = { d, part, idx: i };
-    }
+    eachRing(part, (ring, hole)=>{
+      for (let i=0;i<ring.length;i++){
+        const s = worldToScreen(ring[i]);
+        const d = Math.hypot(sp.x - s.x, sp.y - s.y);
+        if (d < best.d) best = { d, part, idx: i, hole };
+      }
+    });
   }
   return best.d < 12 ? best : null;
 }
@@ -1523,17 +1649,19 @@ function findHandleAt(sp){
   if (!selectedPartId) return null;
   const part = project.parts.find(p=>p.id===selectedPartId);
   if (!part) return null;
-  let best = { d: Infinity, idx:-1, which:null };
-  part.nodes.forEach((nd,i)=>{
-    for (const which of ["in","out"]){
-      const h = which==="in" ? nd.hIn : nd.hOut;
-      if (!h) continue;
-      const s = worldToScreen({ x: nd.x + h.x, y: nd.y + h.y });
-      const d = Math.hypot(sp.x - s.x, sp.y - s.y);
-      if (d < best.d) best = { d, idx:i, which };
-    }
+  let best = { d: Infinity, idx:-1, which:null, hole:undefined };
+  eachRing(part, (ring, hole)=>{
+    ring.forEach((nd,i)=>{
+      for (const which of ["in","out"]){
+        const h = which==="in" ? nd.hIn : nd.hOut;
+        if (!h) continue;
+        const s = worldToScreen({ x: nd.x + h.x, y: nd.y + h.y });
+        const d = Math.hypot(sp.x - s.x, sp.y - s.y);
+        if (d < best.d) best = { d, idx:i, which, hole };
+      }
+    });
   });
-  return best.d < 10 ? { part, idx: best.idx, which: best.which } : null;
+  return best.d < 10 ? { part, idx: best.idx, which: best.which, hole: best.hole } : null;
 }
 
 // ===== Coordinate transforms (world mm <-> screen px) =====
@@ -1673,7 +1801,8 @@ function mirrorNodeIdx(part, idx){
 // 動かした点に合わせて、相手も鏡の位置へ動かす
 function applyMirrorToNodes(moved){
   const byPart = {};
-  for (const m of moved) (byPart[m.partId] = byPart[m.partId] || []).push(m.idx);
+  // 左右対称は外枠だけの仕組み。穴の点は相手を持たないので混ぜない。
+  for (const m of moved) if (!isHoleSel(m)) (byPart[m.partId] = byPart[m.partId] || []).push(m.idx);
   for (const pid in byPart){
     const part = project.parts.find(p=>p.id===pid);
     if (!part || part.symAxis===undefined) continue;
@@ -2145,6 +2274,16 @@ function nodesScreenPath(nodes, closed){
   return d;
 }
 function partScreenPath(part){ return nodesScreenPath(part.nodes, part.closed); }
+// 穴あきパーツの塗り用の道すじ。外の輪と穴の輪をつなげて書き、
+// fill-rule="evenodd"（内側は塗らない）と組み合わせると、本当に向こうが透けて見える穴になる。
+function partFillPath(part){
+  let d = partScreenPath(part);
+  for (const h of (part.holes||[])){
+    if (h && h.length >= 3) d += " " + nodesScreenPath(h, true);
+  }
+  return d;
+}
+const hasHoles = (part)=> !!(part.holes && part.holes.length);
 // Insert a node onto the outline nearest to a world point (returns new index or -1).
 // 寸法線の描き方（寸法線ツールも、計測の書き込みも同じ形式）
 //   点A・点Bから引き出し線を立て、離れた位置に寸法線を渡して、真ん中に数値を置く。
@@ -2423,8 +2562,21 @@ function insertMidForSelection(){
   }
   return added;
 }
-function insertNodeAt(part, wp){
-  const nodes = part.nodes, closed = part.closed, n = nodes.length;
+// 押した場所が、外枠と穴のふちのどちらに近いかを返す（Shift+クリックで点を足す先を決める）
+function nearestRingOf(part, wp){
+  let best = { hole: undefined, d: Infinity };
+  eachRing(part, (ring, hole)=>{
+    const closed = (hole===undefined) ? part.closed : true;
+    const near = nearestOnOutline(flattenNodes(ring, closed), wp, closed);
+    if (near && near.d < best.d) best = { hole, d: near.d };
+  });
+  return best;
+}
+function insertNodeAt(part, wp, hole){
+  const nodes = ringOfPart(part, hole);
+  if (!nodes) return -1;
+  const closed = (hole===undefined) ? part.closed : true;
+  const n = nodes.length;
   const segCount = closed ? n : n-1;
   let best = { d: Infinity, i: -1, pt: null };
   for (let i=0;i<segCount;i++){
@@ -2598,10 +2750,8 @@ function updateActionBar(){
   const anyGrouped = ids.some(id=>{ const p=project.parts.find(pp=>pp.id===id); return p && p.group; });
   document.getElementById("ab-group").style.display   = ids.length>=2 ? "" : "none";
   document.getElementById("ab-ungroup").style.display = anyGrouped ? "" : "none";
-  // 切り抜きなどは「閉じたパーツをちょうど2つ」選んでいるときだけ出す
-  const solid = ids.map(id=>project.parts.find(p=>p.id===id))
-    .filter(p=>p && !p.kind && p.closed && p.nodes.length>=3);
-  const canBool = solid.length===2 && ids.length===2;
+  // 切り抜きなどは「布のパーツを2枚」選んでいるときに出す
+  const canBool = boolReady();
   for (const id of ["ab-bool-sep","ab-sub","ab-and","ab-or"])
     document.getElementById(id).style.display = canBool ? "" : "none";
 }
@@ -2753,23 +2903,29 @@ function renderSelection(){
   if (showPoints()){                                  // 上のバーの「◦ポイント」を外していたら出さない
     for (const part of project.parts){
       if (!marquee && tool!=="fillet" && !isPointTool() && tool!=="len" && tool!=="dist" && !selIds.has(part.id)) continue;
-      part.nodes.forEach((nd,i)=>{
-        const s = worldToScreen(nd);
-        const on = multiSel.some(m=>m.partId===part.id && m.idx===i);
-        frag.appendChild(mk("rect", { x:s.x-4, y:s.y-4, width:8, height:8, class:"selpt"+(on?" on":"") }));
+      eachRing(part, (ring, hole)=>{                  // 外枠と、穴のふちの両方
+        ring.forEach((nd,i)=>{
+          const s = worldToScreen(nd);
+          const on = multiSel.some(m=>m.partId===part.id && m.idx===i && m.hole===hole);
+          frag.appendChild(mk("rect", { x:s.x-4, y:s.y-4, width:8, height:8, class:"selpt"+(on?" on":"") }));
+        });
       });
     }
   }
   // middle-of-edge handles on the selected part: grab one to move that edge
   const selPart = selectedPartId && project.parts.find(p=>p.id===selectedPartId);
   if (showPoints() && tool==="select" && selPart && !marquee && selPart.nodes.length>=2){   // 辺の中央は選択ツールだけ
-    const n = selPart.nodes.length, segCount = selPart.closed ? n : n-1;
-    for (let i=0;i<segCount;i++){
-      const m = segMidWorld(selPart.nodes, i, selPart.closed);
-      const s = worldToScreen(m);
-      const hot = hoverEdge && hoverEdge.partId===selPart.id && hoverEdge.i===i;
-      frag.appendChild(mk("circle", { cx:s.x, cy:s.y, r: hot?6.5:4.5, class:"midpt"+(hot?" hot":"") }));
-    }
+    eachRing(selPart, (ring, hole)=>{                  // 穴のふちにも辺の中央を出す
+      if (ring.length < 2) return;
+      const closed = (hole===undefined) ? selPart.closed : true;
+      const n = ring.length, segCount = closed ? n : n-1;
+      for (let i=0;i<segCount;i++){
+        const m = segMidWorld(ring, i, closed);
+        const s = worldToScreen(m);
+        const hot = hoverEdge && hoverEdge.partId===selPart.id && hoverEdge.i===i && hoverEdge.hole===hole;
+        frag.appendChild(mk("circle", { cx:s.x, cy:s.y, r: hot?6.5:4.5, class:"midpt"+(hot?" hot":"") }));
+      }
+    });
   }
   // selected text
   for (const tid of selTexts){
@@ -2795,8 +2951,9 @@ function renderSelection(){
   // grabbable edge under the cursor
   if (hoverEdge){
     const part = project.parts.find(p=>p.id===hoverEdge.partId);
-    if (part){
-      const seg = segControls(part.nodes, hoverEdge.i, part.closed);
+    const ring = part ? ringOfPart(part, hoverEdge.hole) : null;
+    if (ring && ring.length>=2){
+      const seg = segControls(ring, hoverEdge.i, hoverEdge.hole===undefined ? part.closed : true);
       const A=worldToScreen(seg.A), B=worldToScreen(seg.B);
       let d;
       if (seg.straight) d = `M${A.x} ${A.y} L${B.x} ${B.y}`;
@@ -2945,7 +3102,9 @@ function renderParts(){
     // 塗りは先に敷く。後ろに回さないと、この後に描くステッチ線や縫い代線を隠してしまう。
     normalizeLook(part);
     if (part.fill !== "none" && part.closed && part.nodes.length >= 3){
-      const fp = mk("path", { d: partScreenPath(part), fill: part.fill, stroke: "none" });
+      // 穴があるときは evenodd を使う。穴の中は塗られず、下にあるものが透けて見える。
+      const fp = mk("path", { d: partFillPath(part), fill: part.fill, stroke: "none",
+        "fill-rule": hasHoles(part) ? "evenodd" : "nonzero" });
       fp.style.fillOpacity = (part.fillOpacity/100) * (selected ? 1.6 : 1);
       pg.appendChild(fp);
     }
@@ -2981,6 +3140,15 @@ function renderParts(){
     // 線幅の指定があれば使う。CSSの指定に勝たせるため style で当てる
     if (part.lw > 0) path.style.strokeWidth = (selected ? part.lw + 1 : part.lw);
     pg.appendChild(path);
+    // 穴のふち。裁つ線なので、外の輪郭と同じ描き方にする
+    for (const h of (part.holes||[])){
+      if (!h || h.length < 3) continue;
+      const hp = mk("path", { d: nodesScreenPath(h, true),
+        class: "part-outline" + (selected?" selected":""),
+        fill: "none", stroke: lineColorOf(part), "data-part": part.id });
+      if (part.lw > 0) hp.style.strokeWidth = (selected ? part.lw + 1 : part.lw);
+      pg.appendChild(hp);
+    }
     // edge length labels (arc length for curved segments)
     if (showDim){
       const count = part.closed ? part.nodes.length : part.nodes.length-1;
@@ -3074,10 +3242,12 @@ function renderHandles(){
   if (tool !== "select" || !selectedPartId) return;
   const part = project.parts.find(p=>p.id===selectedPartId);
   if (!part) return;
-  part.nodes.forEach((n,i)=>{
-    let cls = drag&&drag.index===i ? " dragging" : "";
-    if (selVertex && selVertex.partId===part.id && selVertex.idx===i) cls += " sel";
-    drawNodeGizmo(frag, n, cls);
+  eachRing(part, (ring, hole)=>{                      // 外枠と、穴のふちの両方に腕を出す
+    ring.forEach((n,i)=>{
+      let cls = (drag && drag.index===i && drag.hole===hole) ? " dragging" : "";
+      if (selVertex && selVertex.partId===part.id && selVertex.idx===i && selVertex.hole===hole) cls += " sel";
+      drawNodeGizmo(frag, n, cls);
+    });
   });
   gHandles.appendChild(frag);
 }
@@ -3450,6 +3620,7 @@ function duplicatePart(part, dx, dy){
   copy.name = part.name ? part.name + "（複製）" : "";
   copy.nodes = copy.nodes.map(nd => ({ x:nd.x+dx, y:nd.y+dy, hIn:nd.hIn, hOut:nd.hOut }));
   if (copy.notches) copy.notches = copy.notches.map(p => ({ x:p.x+dx, y:p.y+dy }));
+  if (copy.holes) copy.holes = copy.holes.map(h => h.map(nd => ({ x:nd.x+dx, y:nd.y+dy, hIn:nd.hIn, hOut:nd.hOut })));
   if (copy.symAxis!==undefined) copy.symAxis += dx;     // 左右対称の軸も一緒に運ぶ
   delete copy.symPair;
   project.parts.push(copy);
@@ -3457,8 +3628,10 @@ function duplicatePart(part, dx, dy){
   return copy;
 }
 // Round a corner node with a tangent circular arc (fillet) of the given radius.
-function filletNode(part, idx, radius){
-  const nodes = part.nodes, n = nodes.length, closed = part.closed;
+function filletNode(part, idx, radius, hole){
+  const nodes = ringOfPart(part, hole);
+  if (!nodes) return false;
+  const n = nodes.length, closed = (hole===undefined) ? part.closed : true;   // 穴の輪はいつも閉じている
   if (n < 3) return false;
   if (!closed && (idx===0 || idx===n-1)) return false; // endpoints of an open path have one edge
   const cur = nodes[idx];
@@ -3714,7 +3887,7 @@ svg.addEventListener("mousedown", (e)=>{
     // 1) ベジェハンドル：曲線の曲がり具合を調整
     const h = findHandleAt(sp);
     if (h && !e.shiftKey){
-      handleDrag = { partId: h.part.id, index: h.idx, which: h.which };
+      handleDrag = { partId: h.part.id, index: h.idx, which: h.which, hole: h.hole };
       selectedPartId = h.part.id;
       selTexts = [];              // 曲線をいじる操作なので文字の選択は外す
       render(); return;
@@ -3725,42 +3898,53 @@ svg.addEventListener("mousedown", (e)=>{
       const part = selectedPartId ? project.parts.find(p=>p.id===selectedPartId) : (findPartAt(wp)||findLinePartAt(wp));
       if (part){
         selectedPartId = part.id;
-        const idx = insertNodeAt(part, wp);
+        const near = nearestRingOf(part, wp);              // 外枠と穴、近いほうに足す
+        const idx = insertNodeAt(part, wp, near.hole);
         if (idx>=0){
-          if (part.symAxis!==undefined){
+          if (near.hole===undefined && part.symAxis!==undefined){
             const nd=part.nodes[idx];
             rebuildSymmetry(part, nd.x < part.symAxis ? "left" : "right");
           }
-          selVertex={partId:part.id, idx}; selMode="points"; startMove([{partId:part.id, idx}], []); render(); return; }
+          const key = near.hole===undefined ? {partId:part.id, idx} : {partId:part.id, idx, hole:near.hole};
+          selVertex=key; selMode="points"; startMove([key], []); render(); return; }
       }
     }
     // 3) 頂点：その点だけを動かす（ダブルクリックで角↔曲線）
+    //    穴のふちの点も、外枠の点とまったく同じように扱う
     if (v){
+      const vKey = { partId: v.part.id, idx: v.idx };
+      if (v.hole!==undefined) vKey.hole = v.hole;
       selectedPartId = v.part.id;
-      selVertex = { partId: v.part.id, idx: v.idx };
+      selVertex = vKey;
       const now = Date.now();
-      if (lastVClick.id===v.part.id && lastVClick.idx===v.idx && (now - lastVClick.t) < 400){
-        toggleNodeSmooth(v.part.nodes, v.idx, v.part.closed);
-        applyMirrorToNodes([{ partId:v.part.id, idx:v.idx }]);   // 反対側も同じ形に
-        lastVClick = { id:null, idx:-1, t:0 }; saveLocal(); render(); return;
+      const sameAsLast = lastVClick.id===v.part.id && lastVClick.idx===v.idx && lastVClick.hole===v.hole;
+      if (sameAsLast && (now - lastVClick.t) < 400){
+        const ring = ringOfPart(v.part, v.hole);
+        toggleNodeSmooth(ring, v.idx, v.hole!==undefined ? true : v.part.closed);
+        if (v.hole===undefined) applyMirrorToNodes([vKey]);      // 反対側も同じ形に（穴は対象外）
+        lastVClick = { id:null, idx:-1, hole:undefined, t:0 }; saveLocal(); render(); return;
       }
-      lastVClick = { id:v.part.id, idx:v.idx, t:now };
+      lastVClick = { id:v.part.id, idx:v.idx, hole:v.hole, t:now };
       // 複数点を囲んで選んでいた場合だけ、その一団をまとめて動かす
-      const inPointSel = (selMode==="points") && multiSel.some(m=>m.partId===v.part.id && m.idx===v.idx) && multiSel.length>1;
+      const inPointSel = (selMode==="points")
+        && multiSel.some(m=>m.partId===v.part.id && m.idx===v.idx && m.hole===v.hole) && multiSel.length>1;
       selMode = "points";
       // 点をつかむ操作では文字を連れて行かない（1つでも、囲んだ一団でも同じ）。
       // 文字ごと動かしたい時は、点ではなくパーツの面か文字そのものをつかむ。
       if (inPointSel) startMove(multiSel, []);
-      else            startMove([{ partId:v.part.id, idx:v.idx }], []);
+      else            startMove([vKey], []);
       render(); return;
     }
     // 4) 辺の中央ハンドル：つかむとその辺ごと動いて長さ・形が変わる
     if (selectedPartId){
       const me = findMidEdgeAt(sp, selectedPartId);
       if (me){
-        const n = me.part.nodes.length;
+        const ring = ringOfPart(me.part, me.hole);
+        const n = ring.length;
         selVertex = null; selMode = "points";
-        startMove([{ partId:me.part.id, idx:me.i }, { partId:me.part.id, idx:(me.i+1)%n }], []);
+        const key = (i)=> me.hole===undefined ? { partId:me.part.id, idx:i }
+                                              : { partId:me.part.id, idx:i, hole:me.hole };
+        startMove([key(me.i), key((me.i+1)%n)], []);
         render(); return;
       }
     }
@@ -3801,6 +3985,21 @@ svg.addEventListener("mousedown", (e)=>{
     // 線は細い当たり判定なので、線の近くをクリックした時だけ勝つ。
     const part = findLinePartAt(wp) || findPartAt(wp);
     if (part){
+      // ⌘+クリック（Windowsは Ctrl+クリック）：今の選択に、そのパーツを足す／外す。
+      // 切り抜きのように「2枚を選ぶ」場面で、いちいち囲まなくてよくなる。
+      // Shift+クリックは「輪郭に点を追加」で先に使っているので、こちらを使う。
+      if (e.metaKey || (!IS_MAC && e.ctrlKey)){
+        const already = multiSel.some(m=>m.partId===part.id);
+        if (already){
+          multiSel = multiSel.filter(m=>m.partId!==part.id);
+          if (selectedPartId===part.id) selectedPartId = multiSel.length ? multiSel[0].partId : null;
+        } else {
+          part.nodes.forEach((_,i)=>multiSel.push({ partId:part.id, idx:i }));
+          selectedPartId = part.id;
+        }
+        selVertex = null; selMode = "part";
+        render(); return;
+      }
       // すでに複数選択されている中のパーツを掴んだら、選択はそのままで全部動かす
       const inSel = multiSel.some(m=>m.partId===part.id);
       const spanning = new Set(multiSel.map(m=>m.partId)).size > 1 || selTexts.length > 0;
@@ -3967,10 +4166,12 @@ svg.addEventListener("mousedown", (e)=>{
     filletReset();
     const v = findVertexAt(sp);
     if (v){
-      const at = multiSel.findIndex(m=>m.partId===v.part.id && m.idx===v.idx);
-      if (e.shiftKey){ if (at>=0) multiSel.splice(at,1); else multiSel.push({partId:v.part.id, idx:v.idx}); }
+      const key = v.hole===undefined ? { partId:v.part.id, idx:v.idx }
+                                     : { partId:v.part.id, idx:v.idx, hole:v.hole };
+      const at = multiSel.findIndex(m=>m.partId===v.part.id && m.idx===v.idx && m.hole===v.hole);
+      if (e.shiftKey){ if (at>=0) multiSel.splice(at,1); else multiSel.push(key); }
       else if (at>=0 && multiSel.length>1){ /* すでに選んである一団はそのまま */ }
-      else multiSel = [{ partId:v.part.id, idx:v.idx }];
+      else multiSel = [key];
       selectedPartId = v.part.id; selMode = "points";
       filletApplyToSelection();                 // 今の半径をその場で当てる
       render(); return;
@@ -4047,14 +4248,16 @@ svg.addEventListener("mousemove", (e)=>{
   // Editing a bézier handle endpoint (mirror the opposite handle unless Alt held)
   if (handleDrag){
     const part = project.parts.find(p=>p.id===handleDrag.partId);
-    if (part){
-      const nd = part.nodes[handleDrag.index];
+    const ring = part ? ringOfPart(part, handleDrag.hole) : null;
+    if (ring && ring[handleDrag.index]){
+      const nd = ring[handleDrag.index];
       const off = { x: mouseWorld.x - nd.x, y: mouseWorld.y - nd.y };
       // 連動スイッチが基本。Altを押している間だけ一時的に逆（＝片側だけ）になる
       const mirror = handleMirror ? !e.altKey : e.altKey;
       if (handleDrag.which==="out"){ nd.hOut = off; if (nd.hIn && mirror) nd.hIn = { x:-off.x, y:-off.y }; }
       else { nd.hIn = off; if (nd.hOut && mirror) nd.hOut = { x:-off.x, y:-off.y }; }
-      applyMirrorToNodes([{ partId:part.id, idx:handleDrag.index }]);   // 反対側の腕も鏡に
+      // 左右対称は外枠だけの仕組み。穴には効かせない。
+      if (handleDrag.hole===undefined) applyMirrorToNodes([{ partId:part.id, idx:handleDrag.index }]);
       renderThrottled();
     }
     return;
@@ -4123,12 +4326,18 @@ svg.addEventListener("mousemove", (e)=>{
       const p = project.parts.find(pp=>pp.id===o.partId);
       if (p && p.notches && p.notches[o.i]){ p.notches[o.i].x = o.x + dwx; p.notches[o.i].y = o.y + dwy; }
     }
+    // 穴も一緒に動かす（パーツの一部なので置き去りにしてはいけない）
+    for (const o of (selMove.origHoles||[])){
+      const nd = holeNodeOf(o);
+      if (nd){ nd.x = o.x + dwx; nd.y = o.y + dwy; }
+    }
     renderThrottled();
     return;
   }
   if (drag){
     const part = project.parts.find(p=>p.id===drag.partId);
-    if (part){ const nd = part.nodes[drag.index]; const s = maybeSnap(mouseWorld); nd.x = s.x; nd.y = s.y; renderThrottled(); }
+    const ring = part ? ringOfPart(part, drag.hole) : null;
+    if (ring && ring[drag.index]){ const nd = ring[drag.index]; const s = maybeSnap(mouseWorld); nd.x = s.x; nd.y = s.y; renderThrottled(); }
     return;
   }
   if ((tool==="draw"||tool==="stitch") && draft){ renderThrottled(); }
@@ -4144,9 +4353,9 @@ svg.addEventListener("mousemove", (e)=>{
     // highlight the edge under the cursor so it's obvious you can grab it
     if (tool==="select" && selectedPartId && !selMove && !handleDrag){
       const eg = findMidEdgeAt(sp, selectedPartId);
-      const key = eg ? eg.part.id+":"+eg.i : null;
-      const prev = hoverEdge ? hoverEdge.partId+":"+hoverEdge.i : null;
-      if (key !== prev){ hoverEdge = eg ? { partId:eg.part.id, i:eg.i } : null; renderThrottled(); return; }
+      const key = eg ? eg.part.id+":"+eg.i+":"+eg.hole : null;
+      const prev = hoverEdge ? hoverEdge.partId+":"+hoverEdge.i+":"+hoverEdge.hole : null;
+      if (key !== prev){ hoverEdge = eg ? { partId:eg.part.id, i:eg.i, hole:eg.hole } : null; renderThrottled(); return; }
     } else if (hoverEdge){ hoverEdge = null; renderThrottled(); return; }
     updateHint();
   }
@@ -4342,13 +4551,17 @@ function showFileMenu(x, y){
     <button data-cmd="print">🖨 印刷</button>`;
   placeMenu(m, x, y);
 }
-// 切り抜きなどが使える状態か（閉じたパーツをちょうど2つ選んでいる）
-function boolReady(){
+// 切り抜きに使う2枚を返す（無ければ null）。
+// ステッチ線・矢印・寸法線・文字が一緒に選ばれていても構わない。
+// パーツをクリックすると上に乗ったステッチ線も一緒に選ばれるので、
+// 「ちょうど2つだけ選択」を求めるとボタンが出せなくなる。布のパーツだけを数える。
+function boolParts(){
   const ids = [...new Set(multiSel.map(m=>m.partId))];
-  if (ids.length !== 2) return false;
-  return ids.map(id=>project.parts.find(p=>p.id===id))
-    .filter(p=>p && !p.kind && p.closed && p.nodes.length>=3).length === 2;
+  const solid = ids.map(id=>project.parts.find(p=>p.id===id))
+    .filter(p=>p && !p.kind && p.closed && p.nodes.length>=3);
+  return solid.length === 2 ? solid : null;
 }
+function boolReady(){ return !!boolParts(); }
 function showObjectMenu(x, y, part, text){
   ctxTarget = text ? { text } : { part };
   const cur = text ? (text.color||"#111827") : ((part.stroke!==undefined?part.stroke:part.color)||"#2563eb");
@@ -4380,6 +4593,7 @@ function showObjectMenu(x, y, part, text){
         ? `<button data-cmd="delmeasone">📐 この計測の書き込みを消す</button>` : ""}
     ${measCount()>1 && ((text && text.meas) || (part && part.meas))
         ? `<button data-cmd="clearmeas">📐 計測の書き込みを全部消す（${measCount()}個）</button>` : ""}
+    ${(part && hasHoles(part)) ? `<button data-cmd="fillholes">⬜ 穴を埋める（${part.holes.length}個）</button>` : ""}
     ${boolReady() ? `
       <div class="cm-sep"></div>
       <button data-cmd="boolsub">⊖ 切り抜く（上の形で下を抜く）</button>
@@ -4425,6 +4639,12 @@ document.getElementById("context-menu").addEventListener("click", (e)=>{
     project.guides = [];
     if (xyBase && xyBase.guideId) xyBase = null;
     saveLocal(); render();
+  }
+  else if (cmd==="fillholes" && ctxTarget && ctxTarget.part){
+    pushUndo();
+    const n = (ctxTarget.part.holes||[]).length;
+    delete ctxTarget.part.holes;
+    saveLocal(); render(); toast(`穴を${n}個うめました`);
   }
   else if (cmd==="boolsub"){ booleanSelection("sub"); }
   else if (cmd==="booland"){ booleanSelection("and"); }
@@ -4770,11 +4990,13 @@ function filletStart(){
   const parts = {};
   for (const pid of new Set(multiSel.map(m=>m.partId))){
     const p = project.parts.find(x=>x.id===pid);
-    if (p) parts[pid] = JSON.parse(JSON.stringify(p.nodes));
+    // 外枠と穴の両方を控える（半径を動かすたびに、ここから作り直すため）
+    if (p) parts[pid] = { nodes: JSON.parse(JSON.stringify(p.nodes)),
+                          holes: p.holes ? JSON.parse(JSON.stringify(p.holes)) : null };
   }
   if (!Object.keys(parts).length) return false;
   pushUndo();                                   // ひと続きの操作で1回だけ
-  filletBase = { parts, sel: multiSel.map(m=>({partId:m.partId, idx:m.idx})) };
+  filletBase = { parts, sel: multiSel.map(m=>({partId:m.partId, idx:m.idx, hole:m.hole})) };
   return true;
 }
 function filletLive(r){
@@ -4783,17 +5005,27 @@ function filletLive(r){
   // まず元の形に戻す
   for (const pid in filletBase.parts){
     const p = project.parts.find(x=>x.id===pid);
-    if (p) p.nodes = JSON.parse(JSON.stringify(filletBase.parts[pid]));
+    if (!p) continue;
+    const b = filletBase.parts[pid];
+    p.nodes = JSON.parse(JSON.stringify(b.nodes));
+    if (b.holes) p.holes = JSON.parse(JSON.stringify(b.holes)); else delete p.holes;
   }
   if (r > 0){
-    // 1つ丸めるたびに点が1つ増えるので、番号の大きい角から処理する
-    const byPart = {};
-    for (const m of filletBase.sel) (byPart[m.partId] = byPart[m.partId] || []).push(m.idx);
-    for (const pid in byPart){
+    // 1つ丸めるたびに点が1つ増えるので、番号の大きい角から処理する。
+    // 外枠と穴は別々の輪なので、輪ごとに分けて数える。
+    const byRing = {};
+    for (const m of filletBase.sel){
+      const k = m.partId + " " + (m.hole===undefined ? "" : m.hole);
+      (byRing[k] = byRing[k] || []).push(m.idx);
+    }
+    const touched = new Set();
+    for (const k in byRing){
+      const [pid, hs] = k.split(" ");
       const p = project.parts.find(x=>x.id===pid);
       if (!p) continue;
-      byPart[pid].sort((a,b)=>b-a).forEach(i=>filletNode(p, i, r));
-      rebuildSymmetry(p);                       // 左右対称なら反対側もそろえる
+      const hole = hs==="" ? undefined : Number(hs);
+      byRing[k].sort((a,b)=>b-a).forEach(i=>filletNode(p, i, r, hole));
+      if (hole===undefined && !touched.has(pid)){ touched.add(pid); rebuildSymmetry(p); }  // 左右対称は外枠だけ
     }
   }
   saveLocal(); render();
