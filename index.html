@@ -424,6 +424,16 @@
         <input type="number" id="edge-len" min="0.1" step="1" style="width:60px">mm
       </label>
       <button id="edge-pivot" title="どちら側を動かさずに固定するか">◐ 始点を固定</button>
+      <span class="sep"></span>
+      <label title="この距離だけ、辺をまるごと動かします">移動
+        <input type="number" id="edge-move" value="10" min="0" step="1" style="width:52px">mm
+      </label>
+      <button id="edge-mv-left"  title="左へ動かす">←</button>
+      <button id="edge-mv-right" title="右へ動かす">→</button>
+      <button id="edge-mv-up"    title="上へ動かす">↑</button>
+      <button id="edge-mv-down"  title="下へ動かす">↓</button>
+      <button id="edge-mv-out"   title="辺に直角に、外側へ動かす">⊥外</button>
+      <button id="edge-mv-in"    title="辺に直角に、内側へ動かす">⊥内</button>
       <span id="edge-info" style="opacity:.8"></span>
     </span>
     <span class="ctx" id="ctx-fillet">
@@ -681,6 +691,13 @@
       <p>曲がった辺なら、曲がり方もそのまま一緒に回ります。
       左右対称のパーツでは、反対側の辺も鏡になって動きます。
       やり直したいときは ⌘Z で戻せます。</p>
+      <p><b>辺をそのまま平行に動かす</b>には、<b>移動</b>の欄に距離を入れてボタンを押します。</p>
+      <ul>
+        <li><b>← → ↑ ↓</b> … その向きへ、入れた距離だけ動かします</li>
+        <li><b>⊥外 / ⊥内</b> … <b>辺に直角に</b>、外側／内側へ動かします（幅を広げる・狭めるのに便利）</li>
+      </ul>
+      <p>両端の点が同じだけ動くので、辺の角度と長さは変わりません。
+      曲がり方も、辺に付いている合印もそのままです。</p>
 
       <h3>スナップ（格子への吸着）</h3>
       <p><b>スナップ</b>は、格子の線の<b>近くに来たときだけ</b>吸い寄せます。
@@ -1433,6 +1450,44 @@ function applyEdge(deg, len){
   resnapNotches(e.part);
   saveLocal(); render();
   return true;
+}
+// 選んだ辺を、そのままの向きで平行に動かす。両端の点を同じだけずらす。
+function moveEdgeBy(dx, dy){
+  const e = edgeEnds(selEdge); if (!e) return false;
+  if (!isFinite(dx) || !isFinite(dy) || (dx===0 && dy===0)) return false;
+  pushUndo();
+  const moved = [
+    { partId:e.part.id, idx:e.ai, hole:selEdge.hole },
+    { partId:e.part.id, idx:e.bi, hole:selEdge.hole }
+  ];
+  const doMirror = (selEdge.hole===undefined && e.part.symAxis!==undefined);
+  if (doMirror) captureSymPairs(moved);      // 鏡の相手は動かす前に控える
+  e.a.x += dx; e.a.y += dy;
+  e.b.x += dx; e.b.y += dy;
+  if (doMirror){ applyMirrorToNodes(moved); clearSymPairs(); }
+  resnapNotches(e.part);                     // 合印を輪郭の上に貼り直す
+  saveLocal(); render();
+  return true;
+}
+// 辺に直角な向き。out=true なら外側（パーツの外へ出る側）。
+function edgeNormal(out){
+  const e = edgeEnds(selEdge); if (!e) return null;
+  const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y;
+  const L = Math.hypot(dx, dy); if (L < 1e-9) return null;
+  let nx = -dy/L, ny = dx/L;                 // 辺に直角の向き
+  // どちらが外かは、少しずらした点が輪の内側かどうかで決める
+  const mid = { x:(e.a.x+e.b.x)/2, y:(e.a.y+e.b.y)/2 };
+  const flat = flattenNodes(e.ring, e.closed);
+  const probe = { x: mid.x + nx*0.01, y: mid.y + ny*0.01 };
+  const probeInside = pointInRing(probe, flat);
+  if (probeInside === !!out){ nx = -nx; ny = -ny; }   // 望む側と逆なら反転
+  return { nx, ny };
+}
+function moveEdgePerp(out){
+  const n = edgeNormal(out); if (!n) return false;
+  const d = parseFloat(document.getElementById("edge-move").value);
+  if (!isFinite(d) || d<=0) return false;
+  return moveEdgeBy(n.nx*d, n.ny*d);
 }
 function updateEdgeBar(){
   const bar = document.getElementById("ctx-edge");
@@ -5552,6 +5607,23 @@ filletNum.addEventListener("input", ()=>{ filletSlider.value = filletNum.value; 
     updateEdgeBar(); render();
     toast(edgePivotEnd ? "終点を固定します（始点が動きます）" : "始点を固定します（終点が動きます）");
   });
+  // 辺をまるごと動かす。上下左右と、辺に直角な向き（垂直）。
+  const mv = document.getElementById("edge-move");
+  const dist = ()=> {
+    const d = parseFloat(mv.value);
+    return (isFinite(d) && d>0) ? d : 0;
+  };
+  const step = (dx,dy)=>{
+    if (!selEdge) return;
+    const d = dist(); if (!d) return;
+    moveEdgeBy(dx*d, dy*d);
+  };
+  document.getElementById("edge-mv-left").addEventListener("click", ()=>step(-1,0));
+  document.getElementById("edge-mv-right").addEventListener("click", ()=>step(1,0));
+  document.getElementById("edge-mv-up").addEventListener("click", ()=>step(0,-1));   // 画面の縦は下が＋
+  document.getElementById("edge-mv-down").addEventListener("click", ()=>step(0,1));
+  document.getElementById("edge-mv-out").addEventListener("click", ()=>{ if (selEdge) moveEdgePerp(true); });
+  document.getElementById("edge-mv-in").addEventListener("click",  ()=>{ if (selEdge) moveEdgePerp(false); });
 })();
 
 // ----- これから描くパーツの色えらび（図形ツールの欄） -----
