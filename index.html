@@ -223,6 +223,12 @@
   .vertex.dragging { cursor: grabbing; fill: #2563eb; }
   .vertex.sel { fill: #f59e0b; stroke: #b45309; stroke-width: 2.5; }
   /* 合印を入れるとき、吸着できるポイントを小さな点で見せる。狙っている点は大きく色を変える */
+  /* 画面の下に少しの間だけ出るお知らせ */
+  #toast { position: fixed; left: 50%; bottom: 54px; transform: translateX(-50%) translateY(8px);
+    background: #1f2937; color: #f9fafb; padding: 9px 16px; border-radius: 8px; font-size: 13px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.35); z-index: 40; pointer-events: none;
+    opacity: 0; transition: opacity .15s, transform .15s; white-space: nowrap; }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   .snap-dot { fill: #fff; stroke: #2563eb; stroke-width: 1.2; vector-effect: non-scaling-stroke; pointer-events: none; }
   .snap-dot.on { fill: #f59e0b; stroke: #b45309; stroke-width: 2; }
   .selpt { fill: #fff; stroke: #2563eb; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
@@ -431,6 +437,10 @@
       <button id="ab-dup" title="複製">⧉</button>
       <button id="ab-fliph" title="左右反転">⇋</button>
       <button id="ab-flipv" title="上下反転">⇅</button>
+      <span class="sep" id="ab-bool-sep"></span>
+      <button id="ab-sub" title="切り抜く：上のパーツの形で、下のパーツを切り抜きます">⊖</button>
+      <button id="ab-and" title="重なった所だけ残す">⊗</button>
+      <button id="ab-or" title="2つを1枚につなげる">⊕</button>
       <button id="ab-group" title="グループ化">🔗</button>
       <button id="ab-ungroup" title="グループ解除">⛓</button>
       <button id="ab-del" class="danger" title="削除">🗑</button>
@@ -613,6 +623,19 @@
         <li>⋮⋮ をドラッグ … 並び替え（前後関係も変わります。別のレイヤーへも移せます）</li>
       </ul>
       <p>グループ化したものは 🔗 の行にまとまり、名前を付けたり、まとめて表示・非表示にしたり、⛓ で解除したりできます。</p>
+
+      <h3>⊖ 切り抜く（パーツの足し引き）</h3>
+      <p>パーツを<b>2つ選ぶ</b>と、上のバーに ⊖ ⊗ ⊕ が出ます（右クリックからも選べます）。</p>
+      <ul>
+        <li><b>⊖ 切り抜く</b> … 上にあるパーツの形で、下のパーツを抜きます</li>
+        <li><b>⊗ 重なった所だけ残す</b> … 2枚が重なっている部分だけにします</li>
+        <li><b>⊕ 1枚につなげる</b> … 2枚を1枚の形にします</li>
+      </ul>
+      <p>刃にしたパーツ（上にあるほう）は消えます。名前・色・ステッチは下のパーツのものが残ります。</p>
+      <p>切った結果が<b>2枚に分かれた</b>ときは、そのまま2枚のパーツになります（名前に「（分かれ）」が付きます）。
+      真ん中をくり抜いて<b>穴</b>になったときは、穴も1つのパーツになります（名前に「（穴）」、塗りなし）。</p>
+      <p>曲線は自動で曲線のまま復元されます。ズレは0.1mm程度なので、寸法に影響はありません。
+      思ったとおりにならなかったら ⌘Z で戻せます。</p>
 
       <h3>画面を動かす</h3>
       <ul>
@@ -1175,6 +1198,104 @@ function wholePartSelected(){
   return (part && multiSel.length===part.nodes.length) ? part : null;
 }
 // Group the parts referenced by the current selection under a shared group id.
+// 画面の下に、少しの間だけ出るお知らせ
+let toastTimer = null;
+function toast(msg){
+  let el = document.getElementById("toast");
+  if (!el){
+    el = document.createElement("div");
+    el.id = "toast";
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>el.classList.remove("show"), 2600);
+}
+
+// 選んだ2つのパーツで、切り抜き・合体・重なりを行う。
+// 上にあるパーツ（あとから描いたほう）が「刃」になる — Affinity と同じ考え方。
+function booleanSelection(op){
+  const ids = [...new Set(multiSel.map(m=>m.partId))];
+  const parts = ids.map(id=>project.parts.find(p=>p.id===id)).filter(Boolean)
+    .filter(p=>!p.kind && p.closed && p.nodes.length >= 3);
+  if (parts.length !== 2){ toast("閉じたパーツを2つ選んでください"); return; }
+  // project.parts の並び順が前後関係。あとにあるほうが上＝刃
+  parts.sort((a,b)=> project.parts.indexOf(a) - project.parts.indexOf(b));
+  const base = parts[0], cutter = parts[1];
+
+  const A = flattenNodes(base.nodes, true, 24);
+  const B = flattenNodes(cutter.nodes, true, 24);
+  let rings;
+  try { rings = ringBoolean(A, B, op); }
+  catch(err){ toast("この形では計算できませんでした"); return; }
+
+  if (!rings.length){
+    toast(op==="and" ? "重なっている所がありません"
+        : op==="sub" ? "全部が切り取られてしまいます" : "計算できませんでした");
+    return;
+  }
+  // 元の面積と比べて、何も起きていないなら知らせる（重なっていない時など）
+  const areaA = Math.abs(ringArea(A));
+  const total = rings.reduce((s,r)=>s+Math.abs(ringArea(r)), 0);
+  if (op==="sub" && Math.abs(total-areaA) < areaA*0.0005){
+    toast("2つのパーツが重なっていません"); return;
+  }
+
+  pushUndo();
+  // 0.25mm まではズレを許して点を減らす（曲線はこのあと復元されるので、実際のズレは0.1mm程度）
+  const simple = rings.map(r=>simplifyRing(r, 0.25));
+  // 大きい輪が外側、その中に入っている輪は「穴」
+  const withArea = simple.map(r=>({ r, a: Math.abs(ringArea(r)) })).sort((x,y)=>y.a-x.a);
+  const outer = withArea[0].r;
+  const isHole = (r)=> pointInRing(r[0], outer) && r !== outer;
+
+  const at = project.parts.indexOf(base);
+  const made = [];
+  withArea.forEach((w, k)=>{
+    const nodes = ringToNodes(ringCCW(w.r));
+    let p;
+    if (k === 0){                       // 1つめは元のパーツを作り替える（名前も色もそのまま）
+      p = base;
+      p.nodes = nodes;
+      delete p.symAxis;                 // 切ったあとは左右対称ではなくなる
+      delete p.symPair;
+    } else {
+      p = JSON.parse(JSON.stringify(base));
+      p.id = "p"+(idCounter++);
+      p.nodes = nodes;
+      p.notches = [];
+      p.name = base.name ? base.name + (isHole(w.r) ? "（穴）" : "（分かれ）") : "";
+      delete p.symAxis; delete p.symPair;
+      if (isHole(w.r)) p.fill = "none";  // 穴は塗らない（穴に見えるように）
+      project.parts.splice(at + k, 0, p);
+    }
+    made.push(p);
+  });
+  // 合印は、輪郭から離れてしまったものだけ落とす
+  if (base.notches && base.notches.length){
+    const flat = flattenNodes(base.nodes, true);
+    base.notches = base.notches.filter(nt=>{
+      const near = nearestOnOutline(flat, nt, true);
+      return near && near.d <= 6;
+    });
+    resnapNotches(base);
+  }
+  // 刃にしたパーツは消す
+  project.parts = project.parts.filter(p=>p.id !== cutter.id);
+
+  multiSel = [];
+  for (const p of made) p.nodes.forEach((_,i)=>multiSel.push({ partId:p.id, idx:i }));
+  selectedPartId = made[0].id;
+  selVertex = null;
+  saveLocal(); render();
+
+  const holes = withArea.filter(w=>isHole(w.r)).length;
+  const pieces = made.length - holes;
+  toast(op==="sub" ? `切り抜きました（${pieces}枚${holes?"・穴"+holes+"個":""}）`
+      : op==="and" ? "重なった所を残しました" : "合体しました");
+}
+
 function groupSelection(){
   const ids=[...new Set(multiSel.map(m=>m.partId))];
   if (!ids.length && !selTexts.length) return; pushUndo();
@@ -1780,6 +1901,220 @@ function flattenNodes(nodes, closed, steps){
   if (closed) out.pop(); // last sample equals the first anchor
   return out;
 }
+// ===== パーツの切り抜き（重なりを使った形の足し引き）=====
+// やり方：
+//  ① 2つの輪郭を細かい折れ線に直す
+//  ② 交わっている所を全部見つけて、そこで辺をぶつ切りにする
+//  ③ ぶつ切りの一本一本が「相手の内側か外側か」を調べる
+//  ④ 欲しい側だけを拾って、端と端をつないで輪郭に戻す
+// この作りなら、切った結果が2枚に分かれても、穴が空いても、そのまま出せる。
+const BOOL_TOL = 1e-6;                  // 同じ点とみなす距離(mm)
+const boolKey = (p)=> Math.round(p.x/BOOL_TOL)+","+Math.round(p.y/BOOL_TOL);
+
+function ringArea(r){                   // 符号つき面積。向き（時計回りか）を見るのに使う
+  let a = 0;
+  for (let i=0;i<r.length;i++){ const p=r[i], q=r[(i+1)%r.length]; a += p.x*q.y - q.x*p.y; }
+  return a/2;
+}
+function ringCCW(r){ return ringArea(r) > 0 ? r : r.slice().reverse(); }
+
+function pointInRing(p, ring){          // 点が輪郭の内側か（右向きに線を伸ばして数える）
+  let inside = false;
+  for (let i=0, j=ring.length-1; i<ring.length; j=i++){
+    const a = ring[i], b = ring[j];
+    if ((a.y > p.y) !== (b.y > p.y)){
+      const x = a.x + (p.y - a.y) * (b.x - a.x) / (b.y - a.y);
+      if (x > p.x) inside = !inside;
+    }
+  }
+  return inside;
+}
+function distPtSeg(p, a, b){
+  const dx=b.x-a.x, dy=b.y-a.y, L2=dx*dx+dy*dy;
+  if (L2 < 1e-18) return Math.hypot(p.x-a.x, p.y-a.y);
+  let t = ((p.x-a.x)*dx + (p.y-a.y)*dy) / L2; t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x-(a.x+dx*t), p.y-(a.y+dy*t));
+}
+function onRing(p, ring, tol){           // 点が輪郭の線の上に乗っているか
+  for (let i=0;i<ring.length;i++){
+    if (distPtSeg(p, ring[i], ring[(i+1)%ring.length]) <= tol) return true;
+  }
+  return false;
+}
+// 2つの線分が交わる所。平行・重なりは null（そこは「線の上」の判定で拾う）
+function segCross(a1,a2,b1,b2){
+  const rx=a2.x-a1.x, ry=a2.y-a1.y, sx=b2.x-b1.x, sy=b2.y-b1.y;
+  const den = rx*sy - ry*sx;
+  if (Math.abs(den) < 1e-12) return null;
+  const qx=b1.x-a1.x, qy=b1.y-a1.y;
+  const t = (qx*sy - qy*sx)/den, u = (qx*ry - qy*rx)/den;
+  const e = 1e-9;
+  if (t < -e || t > 1+e || u < -e || u > 1+e) return null;
+  return { t, u, p: { x: a1.x + rx*t, y: a1.y + ry*t } };
+}
+// 輪郭を、交点で切り分けた「破片」の並びにする
+function cutRing(ring, cuts){
+  const frags = [];
+  for (let i=0;i<ring.length;i++){
+    const a = ring[i], b = ring[(i+1)%ring.length];
+    const ts = (cuts[i] || []).slice().sort((u,v)=>u.t-v.t);
+    let prev = a;
+    for (const c of ts){
+      if (Math.hypot(c.p.x-prev.x, c.p.y-prev.y) > BOOL_TOL) frags.push([prev, c.p]);
+      prev = c.p;
+    }
+    if (Math.hypot(b.x-prev.x, b.y-prev.y) > BOOL_TOL) frags.push([prev, b]);
+  }
+  return frags;
+}
+// 破片が「相手から見てどこにあるか」を調べる。
+// in=内側 / out=外側 / on-same=線が重なっていて布も同じ側 / on-opp=線は重なるが布は反対側。
+// マグネット吸着で作った図形は辺がぴったり重なることがあるので、この2つを分けないと
+// 「隣に置いただけのパーツで切ると、切った側まで消える」ことになる。
+function classify(frag, self, other){
+  const m = { x:(frag[0].x+frag[1].x)/2, y:(frag[0].y+frag[1].y)/2 };
+  if (!onRing(m, other, BOOL_TOL*20)) return pointInRing(m, other) ? "in" : "out";
+  // 線の上に乗っている場合：線の両脇をのぞいて、どちら側に布があるかを見る
+  const dx = frag[1].x-frag[0].x, dy = frag[1].y-frag[0].y;
+  const L = Math.hypot(dx,dy) || 1;
+  const e = 0.001;                                   // 0.001mm だけ横にずらして調べる
+  const p1 = { x:m.x - dy/L*e, y:m.y + dx/L*e };
+  const p2 = { x:m.x + dy/L*e, y:m.y - dx/L*e };
+  const s1 = pointInRing(p1, self),  s2 = pointInRing(p2, self);
+  const o1 = pointInRing(p1, other), o2 = pointInRing(p2, other);
+  if (s1 === s2) return "on";                        // 判断がつかない（潰れている）
+  if (o1 === o2) return o1 ? "in" : "out";
+  return (s1 === o1) ? "on-same" : "on-opp";
+}
+// 破片を端から端へつないで、閉じた輪郭に戻す
+function chainFrags(frags){
+  const start = new Map();
+  for (const f of frags){
+    const k = boolKey(f[0]);
+    if (!start.has(k)) start.set(k, []);
+    start.get(k).push(f);
+  }
+  const used = new Set();
+  const rings = [];
+  for (const f0 of frags){
+    if (used.has(f0)) continue;
+    const ring = [f0[0]];
+    let cur = f0;
+    used.add(cur);
+    for (let guard=0; guard<frags.length+2; guard++){
+      ring.push(cur[1]);
+      const cand = (start.get(boolKey(cur[1])) || []).find(g=>!used.has(g));
+      if (!cand) break;
+      used.add(cand);
+      cur = cand;
+      if (boolKey(cur[1]) === boolKey(ring[0])){ ring.push(cur[1]); break; }
+    }
+    // 先頭に戻ってきていれば輪、そうでなければ捨てる（切れ端）
+    if (ring.length >= 4 && boolKey(ring[ring.length-1]) === boolKey(ring[0])){
+      ring.pop();
+      if (Math.abs(ringArea(ring)) > 1e-6) rings.push(ring);
+    }
+  }
+  return rings;
+}
+// 本体。op は "sub"（AからBを切り抜く）/ "and"（重なった所だけ）/ "or"（くっつける）
+function ringBoolean(A, B, op){
+  A = ringCCW(A); B = ringCCW(B);
+  const cutsA = {}, cutsB = {};
+  for (let i=0;i<A.length;i++){
+    const a1=A[i], a2=A[(i+1)%A.length];
+    for (let j=0;j<B.length;j++){
+      const b1=B[j], b2=B[(j+1)%B.length];
+      const x = segCross(a1,a2,b1,b2);
+      if (!x) continue;
+      (cutsA[i] = cutsA[i] || []).push({ t:x.t, p:x.p });   // 同じ点を両方に渡すので端がぴったり合う
+      (cutsB[j] = cutsB[j] || []).push({ t:x.u, p:x.p });
+    }
+  }
+  const fa = cutRing(A, cutsA), fb = cutRing(B, cutsB);
+  const rev = (f)=>[f[1], f[0]];
+  const ca = fa.map(f=>classify(f, A, B));   // Aの破片が、Bから見てどこにあるか
+  const cb = fb.map(f=>classify(f, B, A));
+  const pick = (frags, cls, want)=> frags.filter((_,i)=>want.indexOf(cls[i]) >= 0);
+  let keep = [];
+  if (op === "sub"){
+    // Aの外側 ＋ 線が重なっていても布が反対側なら残す（ただ隣り合っているだけの辺）
+    keep = pick(fa, ca, ["out","on-opp"])
+      .concat(pick(fb, cb, ["in"]).map(rev));       // 切り口はBの線を逆向きにたどる
+  } else if (op === "and"){
+    keep = pick(fa, ca, ["in","on-same"])
+      .concat(pick(fb, cb, ["in"]));
+  } else {                                          // or
+    keep = pick(fa, ca, ["out","on-same"])
+      .concat(pick(fb, cb, ["out"]));
+  }
+  const rings = chainFrags(keep);
+  for (const r of rings) markCorners(r, 12);   // 間引く前に、角と曲線を見分けておく
+  return rings;
+}
+// 折れ線を間引く（Douglas-Peucker）。細かすぎる点を減らして編集しやすくする
+// どこが「角」でどこが「曲線の途中」かを、点が細かいうちに見分けて印を付ける。
+// 細かい段階なら、曲線は1点あたり数度しか曲がらず、角ははっきり大きく曲がるので確実に分かる。
+// （間引いたあとに見分けようとすると、曲線も大きく曲がって見えて区別できない）
+function markCorners(ring, deg){
+  const n = ring.length;
+  for (let i=0;i<n;i++){
+    const a = ring[(i-1+n)%n], b = ring[i], c = ring[(i+1)%n];
+    const v1x=b.x-a.x, v1y=b.y-a.y, v2x=c.x-b.x, v2y=c.y-b.y;
+    const l1=Math.hypot(v1x,v1y), l2=Math.hypot(v2x,v2y);
+    if (l1<1e-9 || l2<1e-9){ b._corner = true; continue; }
+    const cos = (v1x*v2x + v1y*v2y)/(l1*l2);
+    b._corner = Math.acos(Math.max(-1,Math.min(1,cos)))*180/Math.PI > deg;
+  }
+}
+// 点を間引く（Douglas-Peucker）。角の点は必ず残す。
+function simplifyRing(ring, tol){
+  const n = ring.length;
+  if (n < 5) return ring;
+  const keep = new Array(n).fill(false);
+  let anchors = [];
+  for (let i=0;i<n;i++) if (ring[i]._corner){ keep[i]=true; anchors.push(i); }
+  if (anchors.length < 2){          // 角が無い（まるい形）→ 0番と一番遠い点で切る
+    let m=0, far=-1;
+    for (let k=1;k<n;k++){
+      const d = Math.hypot(ring[k].x-ring[0].x, ring[k].y-ring[0].y);
+      if (d > far){ far=d; m=k; }
+    }
+    keep[0]=true; keep[m]=true; anchors=[0,m];
+  }
+  const dp = (list)=>{                      // list は ring の添字の並び
+    if (list.length < 3) return;
+    const a = ring[list[0]], b = ring[list[list.length-1]];
+    let bi = -1, bd = tol;
+    for (let k=1;k<list.length-1;k++){
+      const d = distPtSeg(ring[list[k]], a, b);
+      if (d > bd){ bd = d; bi = k; }
+    }
+    if (bi < 0) return;                     // どの点もズレが小さい＝間の点は要らない
+    keep[list[bi]] = true;
+    dp(list.slice(0, bi+1)); dp(list.slice(bi));
+  };
+  for (let a=0;a<anchors.length;a++){       // 角と角の間を、それぞれ間引く
+    const s = anchors[a], e = anchors[(a+1)%anchors.length];
+    const list = [];
+    for (let i=s;;i=(i+1)%n){ list.push(i); if (i===e) break; }
+    dp(list);
+  }
+  const out = ring.filter((_,i)=>keep[i]);
+  return out.length >= 3 ? out : ring;
+}
+// 折れ線をパーツの点に戻す。角の印が付いていない点は「丸い点」にして、曲線をよみがえらせる
+function ringToNodes(ring){
+  const nodes = ring.map(p=>({ x:p.x, y:p.y, hIn:null, hOut:null }));
+  for (let i=0;i<nodes.length;i++){
+    if (ring[i]._corner) continue;              // 角はとがったまま
+    const t = autoHandle(nodes, i, true);
+    nodes[i].hOut = { x:t.x, y:t.y };
+    nodes[i].hIn  = { x:-t.x, y:-t.y };
+  }
+  return nodes;
+}
+
 function segArcLength(nodes, i, closed){
   const seg = segControls(nodes, i, closed);
   if (seg.straight) return dist(seg.A, seg.B);
@@ -2263,6 +2598,12 @@ function updateActionBar(){
   const anyGrouped = ids.some(id=>{ const p=project.parts.find(pp=>pp.id===id); return p && p.group; });
   document.getElementById("ab-group").style.display   = ids.length>=2 ? "" : "none";
   document.getElementById("ab-ungroup").style.display = anyGrouped ? "" : "none";
+  // 切り抜きなどは「閉じたパーツをちょうど2つ」選んでいるときだけ出す
+  const solid = ids.map(id=>project.parts.find(p=>p.id===id))
+    .filter(p=>p && !p.kind && p.closed && p.nodes.length>=3);
+  const canBool = solid.length===2 && ids.length===2;
+  for (const id of ["ab-bool-sep","ab-sub","ab-and","ab-or"])
+    document.getElementById(id).style.display = canBool ? "" : "none";
 }
 
 function renderShapePreview(){
@@ -4001,6 +4342,13 @@ function showFileMenu(x, y){
     <button data-cmd="print">🖨 印刷</button>`;
   placeMenu(m, x, y);
 }
+// 切り抜きなどが使える状態か（閉じたパーツをちょうど2つ選んでいる）
+function boolReady(){
+  const ids = [...new Set(multiSel.map(m=>m.partId))];
+  if (ids.length !== 2) return false;
+  return ids.map(id=>project.parts.find(p=>p.id===id))
+    .filter(p=>p && !p.kind && p.closed && p.nodes.length>=3).length === 2;
+}
 function showObjectMenu(x, y, part, text){
   ctxTarget = text ? { text } : { part };
   const cur = text ? (text.color||"#111827") : ((part.stroke!==undefined?part.stroke:part.color)||"#2563eb");
@@ -4032,6 +4380,11 @@ function showObjectMenu(x, y, part, text){
         ? `<button data-cmd="delmeasone">📐 この計測の書き込みを消す</button>` : ""}
     ${measCount()>1 && ((text && text.meas) || (part && part.meas))
         ? `<button data-cmd="clearmeas">📐 計測の書き込みを全部消す（${measCount()}個）</button>` : ""}
+    ${boolReady() ? `
+      <div class="cm-sep"></div>
+      <button data-cmd="boolsub">⊖ 切り抜く（上の形で下を抜く）</button>
+      <button data-cmd="booland">⊗ 重なった所だけ残す</button>
+      <button data-cmd="boolor">⊕ 1枚につなげる</button>` : ""}
     ${part ? `<button data-cmd="dupobj">複製</button>` : ""}
     <button data-cmd="delobj">🗑 削除</button>`;
   placeMenu(m, x, y);
@@ -4073,6 +4426,9 @@ document.getElementById("context-menu").addEventListener("click", (e)=>{
     if (xyBase && xyBase.guideId) xyBase = null;
     saveLocal(); render();
   }
+  else if (cmd==="boolsub"){ booleanSelection("sub"); }
+  else if (cmd==="booland"){ booleanSelection("and"); }
+  else if (cmd==="boolor"){ booleanSelection("or"); }
   else if (cmd==="delmeasone" && ctxTarget){
     pushUndo();
     const id = ctxTarget.text ? ctxTarget.text.id : ctxTarget.part.id;
@@ -4726,6 +5082,9 @@ document.getElementById("ab-rotr").addEventListener("click", ()=>{ const a=Math.
 document.getElementById("ab-dup").addEventListener("click", duplicateSelection);
 document.getElementById("ab-fliph").addEventListener("click", ()=>flipSelection("h"));
 document.getElementById("ab-flipv").addEventListener("click", ()=>flipSelection("v"));
+document.getElementById("ab-sub").addEventListener("click", ()=>booleanSelection("sub"));
+document.getElementById("ab-and").addEventListener("click", ()=>booleanSelection("and"));
+document.getElementById("ab-or").addEventListener("click",  ()=>booleanSelection("or"));
 document.getElementById("ab-group").addEventListener("click", groupSelection);
 document.getElementById("ab-ungroup").addEventListener("click", ungroupSelection);
 document.getElementById("ab-del").addEventListener("click", deleteSelection);
