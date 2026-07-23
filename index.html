@@ -651,6 +651,16 @@
       たとえば角丸のパーツを切ると22点ほど、円を半分に切ると6点ほどで、あとから形を直しやすい状態です。
       ズレは0.1mm程度なので寸法に影響はありません。思ったとおりにならなかったら ⌘Z で戻せます。</p>
 
+      <h3>スナップ（格子への吸着）</h3>
+      <p><b>スナップ</b>は、格子の線の<b>近くに来たときだけ</b>吸い寄せます。
+      それ以外はマウスにそのままついてくるので、動きはなめらかなままです。</p>
+      <p>格子10mmなら、線から±2.5mm以内で吸い寄せます。
+      たとえば809.5mmの位置で止めると810mmにきっちり乗り、805mmの位置ならそのまま805mmに置けます。</p>
+      <p>まったく吸着させたくないときは<b>スナップのチェックを外して</b>ください。
+      吸着の刻みを変えたいときは、右クリックのメニューで<b>格子</b>の数字を変えます。</p>
+      <p><b>🧲吸着</b>は別のはたらきで、他のパーツの角や辺にぴたっと合わせるためのものです。
+      こちらも近づいたときだけ効きます。</p>
+
       <h3>画面を動かす</h3>
       <ul>
         <li><b>指で撫でる・ホイール</b> … 画面が動く</li>
@@ -855,12 +865,25 @@ let vpW = 0, vpH = 0;
 let svgRect = null;
 function updateViewport(){ vpW = svg.clientWidth; vpH = svg.clientHeight; svgRect = svg.getBoundingClientRect(); }
 // ---- perf: coalesce rapid redraws (drags) into one paint per animation frame ----
+// 画面の描き直しは1コマに1回にまとめる。
+// そのうえで「見る場所を変えただけ（画面移動・拡大縮小）」と
+// 「図面の中身が変わったかも」を分けて扱う。
+// 右の一覧は164個の部品でできていて、作り直すと1コマ74msかかる（＝13コマ/秒でガクガクする）。
+// 画面を動かしただけなら一覧の中身は変わらないので、作り直さない。
 let rafPending = false;
-function renderThrottled(){
+let rafViewOnly = true;
+function scheduleRender(){
   if (rafPending) return;
   rafPending = true;
-  requestAnimationFrame(()=>{ rafPending = false; render(); });
+  requestAnimationFrame(()=>{
+    rafPending = false;
+    const vo = rafViewOnly;
+    rafViewOnly = true;              // 次のコマは、また「画面だけ」から始める
+    render(vo);
+  });
 }
+function renderThrottled(){ rafViewOnly = false; scheduleRender(); }  // 中身が変わったかも
+function renderView(){ scheduleRender(); }                            // 見る場所を変えただけ
 
 // ===== Mac か Windows か =====
 // 開いたときに1回だけ調べて覚えておく（操作のたびに調べ直さない）。
@@ -2837,10 +2860,20 @@ function nearestOnOutline(flat, wp, closed){
 }
 
 // ===== Snapping =====
+// 格子への吸着。格子の線の「近く」に来た時だけ吸い寄せ、それ以外はマウスにそのままついてくる。
+// 常に格子の倍数へ丸めると、10mm刻みで飛ぶ動きになってカクついて見えるため。
+// 吸い寄せる幅は、画面で6px ぶん。ただし格子の1/4より大きくはしない
+// （大きすぎると結局どこにいても吸着してしまい、前と同じカクつきになる）。
+function gridSnapRange(g){ return Math.min(6 / view.scale, g * 0.25); }
+function snapAxis(v, g, thr){
+  const t = Math.round(v/g)*g;
+  return (Math.abs(v - t) < thr) ? t : v;
+}
 function maybeSnap(p){
   if (!document.getElementById("chk-snap").checked) return p;
   const g = Math.max(1, parseFloat(document.getElementById("grid-size").value) || 10);
-  return { x: Math.round(p.x/g)*g, y: Math.round(p.y/g)*g };
+  const thr = gridSnapRange(g);
+  return { x: snapAxis(p.x, g, thr), y: snapAxis(p.y, g, thr) };
 }
 
 // ===== Rendering =====
@@ -3087,7 +3120,9 @@ function renderSnapGuides(){
     else if (g.type==="pt"){ const s=worldToScreen({x:g.x,y:g.y}); gHandles.appendChild(mk("circle",{cx:s.x,cy:s.y,r:5,class:"snap-pt"})); }
   }
 }
-function render(){
+// viewOnly＝見る場所を変えただけ。図面の中身は変わっていないので、
+// 右の一覧や色パネルなど「中身に連動する表示」は作り直さない。
+function render(viewOnly){
   renderGrid();
   renderParts();
   renderTexts();       // text labels/annotations
@@ -3100,14 +3135,16 @@ function render(){
   renderSymAxis();     // 左右対称の軸
   renderSnapGuides();  // magnet guide lines/points
   // the parts list can't change mid-drag - skip the DOM rebuild for smoothness
-  if (!suppressListRender && !selMove && !handleDrag && !penDrag && !textDrag && !marquee && !shapeDrag && !drag){
+  if (!viewOnly && !suppressListRender && !selMove && !handleDrag && !penDrag && !textDrag && !marquee && !shapeDrag && !drag){
     renderPartList(); renderLayerList();
   }
-  renderLookPanel();
+  if (!viewOnly){
+    renderLookPanel();
+    updateModeBadge();
+    updateContextBar();
+    updateActionBar();
+  }
   updateHint();
-  updateModeBadge();
-  updateContextBar();
-  updateActionBar();
   document.getElementById("readout").textContent =
     `X:${Math.round(mouseWorld.x)} Y:${Math.round(mouseWorld.y)}mm ・ ${zoomText()}`;
 }
@@ -4443,7 +4480,7 @@ svg.addEventListener("mousemove", (e)=>{
     if (ctrlPan){                       // 2回目以降: 前回からの差分だけ動かす
       view.tx += sp.x - ctrlPan.x;
       view.ty += sp.y - ctrlPan.y;
-      renderThrottled();
+      renderView();            // 見る場所を変えただけ（一覧は作り直さない）
     } else {                            // 押し始めは基準点を覚えるだけ（いきなり飛ばない）
       svg.classList.add("panning");
     }
@@ -4461,7 +4498,7 @@ svg.addEventListener("mousemove", (e)=>{
   if (panning){
     view.tx = panning.tx + (sp.x - panning.x);
     view.ty = panning.ty + (sp.y - panning.y);
-    renderThrottled();
+    renderView();              // 見る場所を変えただけ
     return;
   }
   // Editing a bézier handle endpoint (mirror the opposite handle unless Alt held)
@@ -4533,7 +4570,16 @@ svg.addEventListener("mousemove", (e)=>{
     let dwx = mouseWorld.x - selMove.startW.x, dwy = mouseWorld.y - selMove.startW.y;
     if (document.getElementById("chk-snap").checked){
       const g = Math.max(1, parseFloat(document.getElementById("grid-size").value)||10);
-      dwx = Math.round(dwx/g)*g; dwy = Math.round(dwy/g)*g;
+      // 「動かした量」ではなく「動かした先の位置」を格子に合わせる。
+      // 量を丸めると、たとえば798の点は808→818…と動き、いつまでも半端な位置のまま。
+      // 位置を合わせれば 800→810→820 と、きりの良い数字に収まる。
+      // さらに、格子の近くに来た時だけ吸い寄せるので、その間はマウスについてくる。
+      const ref = selMove.orig[0];
+      if (ref){
+        const thr = gridSnapRange(g);
+        dwx = snapAxis(ref.x + dwx, g, thr) - ref.x;
+        dwy = snapAxis(ref.y + dwy, g, thr) - ref.y;
+      }
     }
     const adj = magnetAdjust(selMove.orig, dwx, dwy);   // snap to other parts' corners/edges
     dwx = adj.dwx; dwy = adj.dwy;
@@ -4949,20 +4995,24 @@ function wheelDelta(e){
 // 見分け方：惰性は必ず少しずつ弱くなっていく。3回続けて弱くなったら惰性とみなす。
 // 普通のマウスのホイールは同じ強さで届くので、この条件に当たらない。
 // 逆にまた強くなったら「指がまだ触れている」とみなして、すぐ動かし始める。
-let whLastT = 0, whPrev = 0, whDecay = 0, whCoasting = false;
+let whLastT = 0, whPrev = 0, whPeak = 0, whDecay = 0, whCoasting = false;
 function isCoasting(e){
   const now = performance.now();
   const mag = Math.abs(e.deltaX) + Math.abs(e.deltaY);
   if (now - whLastT > 120){          // 間が空いた＝新しい操作の始まり
-    whLastT = now; whPrev = mag; whDecay = 0; whCoasting = false;
+    whLastT = now; whPrev = mag; whPeak = mag; whDecay = 0; whCoasting = false;
     return false;
   }
   whLastT = now;
+  if (mag > whPeak) whPeak = mag;    // その操作でいちばん強かった所を覚えておく
   if (mag > whPrev){                 // 強くなった＝まだ撫でている
     whDecay = 0; whCoasting = false;
   } else if (mag < whPrev * 0.995){  // だんだん弱くなっている
     whDecay++;
-    if (whDecay >= 3) whCoasting = true;
+    // 「弱くなった」だけで止めると、ゆっくり力を抜きながら撫でている時にも
+    // 途中で止まってしまい、引っかかる感じになる。
+    // いちばん強かった時の半分以下まで落ちて、なお弱まり続けている時だけ惰性とみなす。
+    if (whDecay >= 4 && mag < whPeak * 0.5) whCoasting = true;
   }
   whPrev = mag;
   return whCoasting;
@@ -4986,7 +5036,7 @@ svg.addEventListener("wheel", (e)=>{
     view.tx -= dx * PAN_GAIN;
     view.ty -= dy * PAN_GAIN;
   }
-  renderThrottled();
+  renderView();                // 撫でる／ホイールは見る場所が変わるだけ
 }, { passive: false });
 
 window.addEventListener("keydown", (e)=>{
