@@ -482,6 +482,8 @@
       <label title="文字の色"><input type="color" id="text-color" value="#111827" style="width:26px;height:22px;padding:0;border:1px solid #4b5563;border-radius:4px;background:none"></label>
     </span>
     <span class="spacer"></span>
+    <span id="save-state" style="display:none;color:#fca5a5;font-weight:700;white-space:nowrap"
+          title="このブラウザに自動保存できていません。メニューの💾保存でファイルに残してください"></span>
     <button id="btn-help" title="使い方">?</button>
     <button id="btn-sidebar" title="パーツ一覧の表示/非表示">▤ 一覧</button>
     <div id="menu-wrap">
@@ -692,6 +694,16 @@
       <p>図面はこのパソコンの中だけに保存され、どこにも送信されません。
       URLを人に渡しても、相手には空の画面が開くだけで、あなたの図面は見えません。
       （同じパソコンの同じブラウザを他の人が使う場合は見えます）</p>
+      <p><b>「保存したのに無い」ときは、開き場所が違うことが多いです。</b>
+      自動保存は<b>開いている場所ごとに別々</b>になります。
+      ネット（https://…）で開いたときの図面と、パソコンの中のファイルを直接開いたときの図面は、
+      別々に保存されるため、片方で描いたものはもう片方には出てきません。
+      ブラウザを変えたときも同じです。</p>
+      <p>いつも同じ場所から開くようにするか、行き来するときは
+      「💾 保存」でファイルにしてから「📂 開く」で読み込んでください。</p>
+      <p>自動保存ができない状態のときは、上のバーに<b>⚠ 自動保存できません</b>と出ます。
+      これが出ているときは、必ずファイルに保存してください。</p>
+      <p class="hd-where">いま開いている場所: <b id="hd-origin">-</b></p>
 
       <label class="hd-chk"><input type="checkbox" id="hd-hint"> 画面の下に、ツールごとの操作ヒントを出す</label>
     </div>
@@ -5160,6 +5172,11 @@ document.getElementById("grid-size").addEventListener("input", render);
 // ? ボタン＝使い方を開く。画面下のヒント帯は、その中のチェックで出し入れする。
 function openHelp(){
   document.getElementById("hd-hint").checked = document.getElementById("hint").classList.contains("show");
+  // 「保存したのに無い」の切り分け用に、いま開いている場所を出す
+  const o = document.getElementById("hd-origin");
+  if (o) o.textContent = (location.protocol==="file:")
+    ? "このパソコンの中のファイル（file:）"
+    : location.origin;
   document.getElementById("help-back").classList.add("show");
   document.getElementById("help-dlg").classList.add("show");
 }
@@ -5793,15 +5810,25 @@ function newProject(){
 document.getElementById("btn-new").addEventListener("click", newProject);
 
 document.getElementById("btn-save").addEventListener("click", ()=>{
-  savedToFile = true;
   cleanForSave();
-  const data = JSON.stringify(project, null, 2);
-  const blob = new Blob([data], { type:"application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = (project.name||"縫製図面") + ".json";
-  a.click();
-  URL.revokeObjectURL(a.href);
+  try {
+    const data = JSON.stringify(project, null, 2);
+    const blob = new Blob([data], { type:"application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = (project.name||"縫製図面") + ".json";
+    // 画面に一度つないでから押す。つながずに押すと、ブラウザによっては何も起きない。
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    // すぐ片付けると保存が始まる前に取り消されることがあるので、少し待つ
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 4000);
+    savedToFile = true;
+    toast(`ファイルに保存しました（${(data.length/1024).toFixed(0)}KB）。ダウンロードの場所を確認してください`);
+  } catch(e){
+    alert("ファイルに保存できませんでした。\n\n理由: " + (e && e.message ? e.message : "不明"));
+  }
 });
 document.getElementById("btn-load").addEventListener("click", ()=>document.getElementById("file-input").click());
 document.getElementById("file-input").addEventListener("change", (e)=>{
@@ -5827,7 +5854,39 @@ document.getElementById("file-input").addEventListener("change", (e)=>{
 // ===== Persistence (localStorage) =====
 // 作業用の一時データ（symPair）は保存しない
 function cleanForSave(){ for (const p of project.parts) delete p.symPair; }
-function saveLocal(){ cleanForSave(); try { localStorage.setItem("sewing-project", JSON.stringify(project)); } catch(e){} }
+// 自動保存。失敗を黙って捨てないこと。
+// 前は catch で握りつぶしていたので、保存できていないのに気づけず、
+// 開き直したら前の状態に戻っている、ということが起こり得た。
+let saveBroken = false;
+function saveLocal(){
+  cleanForSave();
+  try {
+    const data = JSON.stringify(project);
+    localStorage.setItem("sewing-project", data);
+    // 本当に書けたか確かめる（容量オーバーなどで黙って失敗する場合がある）
+    if (localStorage.getItem("sewing-project") !== data) throw new Error("書き込めていません");
+    if (saveBroken){ saveBroken = false; toast("自動保存が復活しました"); }
+    markSaveState(true);
+    return true;
+  } catch(e){
+    if (!saveBroken){
+      saveBroken = true;
+      alert("このブラウザに自動保存できませんでした。\n\n"
+        + "理由: " + (e && e.message ? e.message : "不明") + "\n\n"
+        + "このまま作業を続けると、閉じたときに図面が失われます。\n"
+        + "「≡ メニュー → 💾 保存」でファイルに保存してください。");
+    }
+    markSaveState(false);
+    return false;
+  }
+}
+// 上のバーに、自動保存の状態を出す
+function markSaveState(ok){
+  const el = document.getElementById("save-state");
+  if (!el) return;
+  el.textContent = ok ? "" : "⚠ 自動保存できません";
+  el.style.display = ok ? "none" : "";
+}
 function loadLocal(){
   try {
     const s = localStorage.getItem("sewing-project");
@@ -5878,6 +5937,13 @@ function seedExample(){
   project.parts[0].fabric = "本革A";
 }
 
+// 自動保存が壊れている時だけ、閉じる前に引き止める。
+// ふだんは自動保存されているので、いちいち聞かない。
+window.addEventListener("beforeunload", (e)=>{
+  if (saveBroken && (project.parts.length || (project.texts||[]).length)){
+    e.preventDefault(); e.returnValue = "";
+  }
+});
 // 印刷中は触らない。印刷用の表示に切り替わると #main が消えて resize が飛ぶが、
 // そこで再描画すると再レイアウトを呼び、それがまた resize を呼んで固まってしまう。
 window.addEventListener("resize", ()=>{ if (printing) return; updateViewport(); render(); });
@@ -5919,6 +5985,24 @@ loadLocal();
 seedExample();
 render();
 fitView();
+// 開いた時点で、このブラウザに保存できるか試しておく。
+// 使えないまま作業を続けると、閉じたときに全部消えてしまうため。
+(function checkStorage(){
+  try {
+    localStorage.setItem("__test", "1");
+    if (localStorage.getItem("__test") !== "1") throw new Error("書き込めません");
+    localStorage.removeItem("__test");
+  } catch(e){
+    saveBroken = true;
+    markSaveState(false);
+    // どこで開いているかも出す（開き場所ごとに保存が別々になるため）
+    alert("このブラウザでは自動保存が使えません。\n\n"
+      + "理由: " + (e && e.message ? e.message : "不明") + "\n\n"
+      + "描いた図面は、閉じると失われます。\n"
+      + "作業のあとは必ず「≡ メニュー → 💾 保存」でファイルに残してください。\n\n"
+      + "（プライベートウィンドウを使っている場合は、ふつうの窓で開き直すと直ります）");
+  }
+})();
 </script>
 </body>
 </html>
