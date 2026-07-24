@@ -518,6 +518,7 @@
       <label title="文字の色"><input type="color" id="text-color" value="#111827" style="width:26px;height:22px;padding:0;border:1px solid #4b5563;border-radius:4px;background:none"></label>
     </span>
     <span class="spacer"></span>
+    <span id="file-label" style="display:none;opacity:.8;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis"></span>
     <span id="save-state" style="display:none;color:#fca5a5;font-weight:700;white-space:nowrap"
           title="このブラウザに自動保存できていません。メニューの💾保存でファイルに残してください"></span>
     <button id="btn-help" title="使い方">?</button>
@@ -529,6 +530,7 @@
         <button id="btn-new">📄 新規作成</button>
         <button id="btn-fit">🔎 全体表示</button>
         <button id="btn-save">💾 保存</button>
+        <button id="btn-saveas">💾 別名で保存…</button>
         <button id="btn-load">📂 開く</button>
         <button id="btn-print">🖨 印刷</button>
       </div>
@@ -774,6 +776,15 @@
       <h3>保存について</h3>
       <p>描いた図面はブラウザに自動保存されますが、<b>ブラウザのデータを消すと失われます</b>。
       大事な図面は「≡ メニュー → 💾 保存」でファイルに保存してください。読み込みは「📂 開く」です。</p>
+      <p><b>💾 保存 は上書きです。</b>はじめの1回だけ保存先を聞かれ、
+      次からは同じファイルに上書きされます。いま保存される先は、上のバーに
+      <b>📄 ファイル名</b> として出ています。別のファイルにしたいときは
+      <b>💾 別名で保存…</b> を使ってください。</p>
+      <p>「📂 開く」で開いたファイルは、そのまま保存先になります。
+      新規作成すると保存先は忘れるので、別の図面を上書きしてしまう心配はありません。</p>
+      <p>※ Safari など一部のブラウザは上書きに対応していません。その場合は今まで通り
+      ダウンロードになり、同じ名前で保存すると「○○ (1).json」のように
+      <b>別のファイルが増えていきます</b>。開き直すときは、いちばん新しいものを選んでください。</p>
       <p>図面はこのパソコンの中だけに保存され、どこにも送信されません。
       URLを人に渡しても、相手には空の画面が開くだけで、あなたの図面は見えません。
       （同じパソコンの同じブラウザを他の人が使う場合は見えます）</p>
@@ -6251,32 +6262,119 @@ function newProject(){
   scaleDrag = null; selMove = null; marquee = null;
   view = { scale: 2.5, tx: 60, ty: 60 };
   savedToFile = false;
+  // 新しい図面なので、前の保存先は忘れる（別の図面に上書きしてしまわないように）
+  fileHandle = null; fileHandleName = "";
+  if (typeof updateFileLabel === "function") updateFileLabel();
   setTool("select"); saveLocal(); render();
 }
 document.getElementById("btn-new").addEventListener("click", newProject);
 
-document.getElementById("btn-save").addEventListener("click", ()=>{
+// ===== ファイルへの保存 =====
+// ブラウザのダウンロードは「上書き」ができず、同じ名前で保存すると
+// 「○○ (1).json」のように別のファイルが増えていく。
+// そのため「上書きしたつもりが、開き直すと古いまま」ということが起きる。
+// 対応しているブラウザ（Chrome・Edge）では、ファイルを一度選んでもらい、
+// 次からは本当にそのファイルへ書き込む。
+let fileHandle = null;                     // 書き込む先のファイル（覚えておく）
+let fileHandleName = "";                   // その名前（画面に出す用）
+const CAN_FS = (typeof window.showSaveFilePicker === "function");
+const JSON_TYPES = [{ description:"縫製図面", accept:{ "application/json":[".json"] } }];
+
+function suggestedFileName(){
+  const n = (project.name || "縫製図面").trim() || "縫製図面";
+  return n.replace(/[\/\\:*?"<>|]/g, "_") + ".json";
+}
+// 書き込む許可があるか確かめる（無ければ聞く）
+async function ensureWritable(h){
+  if (!h.queryPermission) return true;
+  if (await h.queryPermission({ mode:"readwrite" }) === "granted") return true;
+  return (await h.requestPermission({ mode:"readwrite" })) === "granted";
+}
+// ダウンロード方式（上書きできないブラウザ向け）
+function saveByDownload(data){
+  const blob = new Blob([data], { type:"application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = suggestedFileName();
+  // 画面に一度つないでから押す。つながずに押すと、ブラウザによっては何も起きない。
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  // すぐ片付けると保存が始まる前に取り消されることがあるので、少し待つ
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 4000);
+  savedToFile = true;
+  toast(`ファイルに保存しました（${(data.length/1024).toFixed(0)}KB）。`
+      + `同じ名前で保存すると「(1)」が付いた別のファイルになります`);
+}
+// askNew=true なら、保存先を選び直す（別名で保存）
+async function saveToFile(askNew){
   cleanForSave();
+  const data = JSON.stringify(project, null, 2);
+  if (!CAN_FS){ saveByDownload(data); return; }   // 対応していないブラウザ
   try {
-    const data = JSON.stringify(project, null, 2);
-    const blob = new Blob([data], { type:"application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = (project.name||"縫製図面") + ".json";
-    // 画面に一度つないでから押す。つながずに押すと、ブラウザによっては何も起きない。
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    // すぐ片付けると保存が始まる前に取り消されることがあるので、少し待つ
-    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 4000);
+    if (askNew || !fileHandle){
+      fileHandle = await window.showSaveFilePicker({
+        suggestedName: suggestedFileName(), types: JSON_TYPES
+      });
+      fileHandleName = fileHandle.name;
+    }
+    if (!(await ensureWritable(fileHandle))){
+      toast("そのファイルに書き込む許可が下りませんでした");
+      return;
+    }
+    const w = await fileHandle.createWritable();
+    await w.write(data);
+    await w.close();
     savedToFile = true;
-    toast(`ファイルに保存しました（${(data.length/1024).toFixed(0)}KB）。ダウンロードの場所を確認してください`);
+    updateFileLabel();
+    toast(`「${fileHandleName}」に上書き保存しました（${(data.length/1024).toFixed(0)}KB）`);
   } catch(e){
-    alert("ファイルに保存できませんでした。\n\n理由: " + (e && e.message ? e.message : "不明"));
+    if (e && e.name === "AbortError") return;      // 選ぶのをやめただけ
+    // この場所ではファイルに直接書けない（file:// など）→ ダウンロードに切り替える
+    fileHandle = null; fileHandleName = "";
+    updateFileLabel();
+    saveByDownload(data);
+  }
+}
+// いま、どのファイルに保存されるかを上のバーに出す
+function updateFileLabel(){
+  const el = document.getElementById("file-label");
+  if (!el) return;
+  el.textContent = fileHandleName ? "📄 " + fileHandleName : "";
+  el.style.display = fileHandleName ? "" : "none";
+  el.title = fileHandleName ? "「💾 保存」でこのファイルに上書きします" : "";
+}
+document.getElementById("btn-save").addEventListener("click", ()=>saveToFile(false));
+document.getElementById("btn-saveas").addEventListener("click", ()=>saveToFile(true));
+
+// 読み込み。対応しているブラウザなら、開いたファイルをそのまま保存先として覚える。
+function applyLoaded(obj, name){
+  if (!obj.parts) throw new Error("形式が不正です");
+  // 別の図面を開いたので、前の保存先はいったん忘れる。
+  // 忘れないと「💾 保存」が、さっきまで開いていた別のファイルを上書きしてしまう。
+  fileHandle = null; fileHandleName = ""; updateFileLabel();
+  project = obj;
+  normalizeAllParts();
+  idCounter = Math.max(1, ...project.parts.map(p=>parseInt((p.id||"p0").slice(1))||0)) + 1;
+  selectedPartId = null; draft = null; multiSel = []; selTexts = []; selVertex = null; selEdge = null;
+  savedToFile = true;
+  saveLocal(); fitView();
+  if (name) toast(`「${name}」を開きました`);
+}
+document.getElementById("btn-load").addEventListener("click", async ()=>{
+  if (!CAN_FS){ document.getElementById("file-input").click(); return; }
+  try {
+    const [h] = await window.showOpenFilePicker({ types: JSON_TYPES, multiple:false });
+    const f = await h.getFile();
+    applyLoaded(JSON.parse(await f.text()), f.name);
+    fileHandle = h; fileHandleName = h.name;      // 次の「💾 保存」でここに上書き
+    updateFileLabel();
+  } catch(e){
+    if (e && e.name === "AbortError") return;     // 選ぶのをやめただけ
+    document.getElementById("file-input").click();  // 使えない場所なら今まで通り
   }
 });
-document.getElementById("btn-load").addEventListener("click", ()=>document.getElementById("file-input").click());
 document.getElementById("file-input").addEventListener("change", (e)=>{
   const file = e.target.files[0]; if(!file) return;
   const reader = new FileReader();
@@ -6290,6 +6388,8 @@ document.getElementById("file-input").addEventListener("change", (e)=>{
       idCounter = Math.max(1, ...project.parts.map(p=>parseInt((p.id||"p0").slice(1))||0)) + 1;
       selectedPartId = null; draft = null; multiSel = []; selTexts = [];
       savedToFile = true;
+      // こちらは古いやり方（ファイルの場所を覚えられない）。前の保存先は忘れる。
+      fileHandle = null; fileHandleName = ""; updateFileLabel();
       saveLocal(); fitView();
     } catch(err){ alert("読み込みに失敗しました: " + err.message); }
   };
