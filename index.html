@@ -412,6 +412,10 @@
     <span class="ctx" id="ctx-point">
       <span class="sep"></span>
       <span id="point-mode-label" style="opacity:.85"></span>
+    </span>
+    <!-- 曲線の点を選んだ時：腕の連動を切り替える -->
+    <span class="ctx" id="ctx-mirror">
+      <span class="sep"></span>
       <button id="btn-mirror" class="toggle on" title="曲線の腕（ハンドル）を左右そろえて動かすか、片方ずつ動かすか。Altを押している間は一時的に逆になります">⇔ 腕を連動</button>
     </span>
     <!-- 辺を選んだ時だけ：角度と長さ -->
@@ -458,6 +462,13 @@
         <button id="ab-rotl" title="左に回転">⟲</button>
         <input type="number" id="ab-angle" value="15" min="1" step="1" style="width:38px" title="回転角度">°
         <button id="ab-rotr" title="右に回転">⟳</button>
+      </span>
+      <span class="grp" title="選んでいる点・パーツを、この距離だけ動かします">
+        <label>移動<input type="number" id="ab-move" value="10" min="0" step="1" style="width:52px">mm</label>
+        <button id="ab-mv-left"  title="左へ動かす（← キーでも）">←</button>
+        <button id="ab-mv-right" title="右へ動かす（→ キーでも）">→</button>
+        <button id="ab-mv-up"    title="上へ動かす（↑ キーでも）">↑</button>
+        <button id="ab-mv-down"  title="下へ動かす（↓ キーでも）">↓</button>
       </span>
       <button id="ab-dup" title="複製">⧉</button>
       <button id="ab-fliph" title="左右反転">⇋</button>
@@ -633,6 +644,7 @@
             （Shift を押しながらだと縦横の比率が変わりません）</li>
         <li>文字をクリック … 上のバーで 字体・大きさ・色・太字・縦書き を変更できる</li>
         <li><b>⌘A</b> … 全部選ぶ（囲む必要がありません）</li>
+        <li><b>矢印キー ← → ↑ ↓</b> … 選んでいる点・パーツを、決めた距離だけ動かす</li>
       </ul>
       <p><b>複数のパーツを囲んで選ぶとき</b>：端がはみ出したパーツも、自動でまるごと選ばれます。
       一部の点だけ選ばれた状態で動かすと、そのパーツだけ引き伸ばされて形が変わってしまうためです。
@@ -681,6 +693,18 @@
       <p>曲線は<b>曲線のまま、少ない点で</b>作り直されます。
       たとえば角丸のパーツを切ると22点ほど、円を半分に切ると6点ほどで、あとから形を直しやすい状態です。
       ズレは0.1mm程度なので寸法に影響はありません。思ったとおりにならなかったら ⌘Z で戻せます。</p>
+
+      <h3>← → 選んだものを数字で動かす</h3>
+      <p>点やパーツを選ぶと、上のバーに <b>移動 [ ]mm</b> と <b>← → ↑ ↓</b> が出ます。
+      距離を入れてボタンを押すと、その向きへぴったりその距離だけ動きます。
+      <b>キーボードの矢印キー</b>でも同じように動きます。</p>
+      <ul>
+        <li><b>Shift+矢印</b> … 10倍の距離（10mmなら100mm）</li>
+        <li><b>Alt+矢印</b> … 10分の1の距離（10mmなら1mm）で微調整</li>
+      </ul>
+      <p>点を1つだけ選べばその点だけ、パーツごと選べばまるごと動きます。
+      曲線の曲がり方・合印・穴・文字も一緒についてきます。
+      左右対称のパーツなら、反対側も鏡になって動きます。</p>
 
       <h3>∠ 辺の角度・長さを数字で決める</h3>
       <p>パーツを選んでから、<b>オレンジ●（辺の中央）をクリック</b>すると、その辺が青く光ります。
@@ -1488,6 +1512,50 @@ function moveEdgePerp(out){
   const d = parseFloat(document.getElementById("edge-move").value);
   if (!isFinite(d) || d<=0) return false;
   return moveEdgeBy(n.nx*d, n.ny*d);
+}
+// 選んでいる点・パーツを、まとめて平行に動かす。
+// ドラッグと同じことを、数字で正確にやるためのもの。
+function moveSelectionBy(dx, dy){
+  if (!multiSel.length && !selTexts.length) return false;
+  if (!isFinite(dx) || !isFinite(dy) || (dx===0 && dy===0)) return false;
+  pushUndo();
+  captureSymPairs(multiSel);                 // 鏡の相手は動かす前に控える
+  const notches = captureNotches(multiSel);  // まるごと選ばれたパーツの合印
+  const holes = captureHoles(multiSel);      // 同じくパーツの穴
+  for (const m of multiSel){
+    const nd = nodeOf(m);
+    if (nd){ nd.x += dx; nd.y += dy; }
+  }
+  applyMirrorToNodes(multiSel);              // 左右対称なら反対側も
+  clearSymPairs();
+  for (const o of notches){
+    const p = project.parts.find(pp=>pp.id===o.partId);
+    if (p && p.notches && p.notches[o.i]){ p.notches[o.i].x = o.x + dx; p.notches[o.i].y = o.y + dy; }
+  }
+  for (const o of holes){
+    const nd = holeNodeOf(o);
+    if (nd){ nd.x = o.x + dx; nd.y = o.y + dy; }
+  }
+  for (const id of selTexts){
+    const t = project.texts.find(x=>x.id===id);
+    if (t){ t.x += dx; t.y += dy; }
+  }
+  resnapMovedNotches(multiSel);              // 一部だけ動かした時は輪郭に貼り直す
+  resyncSymAxisFor(multiSel);                // 対称の軸も付いていく
+  saveLocal(); render();
+  return true;
+}
+// 選んでいる点の中に「曲線の点（腕を持つ点）」があるか。
+// 腕をつかんで動かしている最中も、切り替えを出したままにする。
+function curveNodeSelected(){
+  if (handleDrag){
+    const p = project.parts.find(q=>q.id===handleDrag.partId);
+    const ring = p ? ringOfPart(p, handleDrag.hole) : null;
+    if (ring && ring[handleDrag.index]) return true;
+  }
+  const check = (m)=>{ const nd = nodeOf(m); return !!(nd && (nd.hIn || nd.hOut)); };
+  if (selVertex && check(selVertex)) return true;
+  return multiSel.some(check);
 }
 function updateEdgeBar(){
   const bar = document.getElementById("ctx-edge");
@@ -3128,6 +3196,10 @@ function updateContextBar(){
       : "基準にする点をクリック";
   }
   document.getElementById("ctx-point").classList.toggle("show", isPointTool() && tool!=="pt-xy");
+  // 腕の連動は「曲線の点をいじれる場面」で出す。
+  // ポイント系ツールのときと、選択ツールで曲線の点（腕を持つ点）を選んでいるとき。
+  document.getElementById("ctx-mirror").classList.toggle("show",
+    (isPointTool() && tool!=="pt-xy") || (tool==="select" && curveNodeSelected()));
   if (isPointTool()){
     document.getElementById("point-mode-label").textContent =
       tool==="pt-corner" ? "◆ 辺をクリックすると角の点を足します"
@@ -4358,6 +4430,10 @@ svg.addEventListener("mousedown", (e)=>{
     const h = findHandleAt(sp);
     if (h && !e.shiftKey){
       handleDrag = { partId: h.part.id, index: h.idx, which: h.which, hole: h.hole };
+      // 腕をつかんだ点も「選んだ点」として覚える。
+      // これが無いと、腕を離した瞬間に腕の連動ボタンが消えてしまう。
+      selVertex = h.hole===undefined ? { partId: h.part.id, idx: h.idx }
+                                     : { partId: h.part.id, idx: h.idx, hole: h.hole };
       selectedPartId = h.part.id;
       selTexts = [];              // 曲線をいじる操作なので文字の選択は外す
       render(); return;
@@ -5341,6 +5417,20 @@ window.addEventListener("keydown", (e)=>{
     else if (e.key==="Backspace"){ e.preventDefault(); draft.nodes.pop(); if(!draft.nodes.length) draft=null; render(); }
   }
 
+  // 矢印キーで、選んだものを動かす。距離は上のバーの「移動」欄の数字。
+  // Shiftを押しながらだと10倍、Altを押しながらだと1/10で、細かくも大きくも動かせる。
+  if (tool==="select" && !drawing && (multiSel.length || selTexts.length) &&
+      (e.key==="ArrowLeft"||e.key==="ArrowRight"||e.key==="ArrowUp"||e.key==="ArrowDown")){
+    e.preventDefault();
+    let d = abMoveDist();
+    if (!d) return;
+    if (e.shiftKey) d *= 10;
+    else if (e.altKey) d /= 10;
+    const dx = e.key==="ArrowLeft" ? -d : e.key==="ArrowRight" ? d : 0;
+    const dy = e.key==="ArrowUp"   ? -d : e.key==="ArrowDown"  ? d : 0;
+    moveSelectionBy(dx, dy);
+    return;
+  }
   if ((e.key==="Delete"||e.key==="Backspace") && tool==="select" && multiSel.length){
     e.preventDefault(); deleteSelection(); return;
   }
@@ -5893,6 +5983,19 @@ document.getElementById("btn-print").addEventListener("click", openPrintDialog);
 // ----- floating action bar (選択モード) -----
 document.getElementById("ab-rotl").addEventListener("click", ()=>{ const a=Math.abs(parseFloat(document.getElementById("ab-angle").value)||15); rotateSelection(-a); });
 document.getElementById("ab-rotr").addEventListener("click", ()=>{ const a=Math.abs(parseFloat(document.getElementById("ab-angle").value)||15); rotateSelection(a); });
+// 選んだものを矢印で動かす。ボタンでも、キーボードの矢印キーでも同じ距離だけ動く。
+function abMoveDist(){
+  const d = parseFloat(document.getElementById("ab-move").value);
+  return (isFinite(d) && d>0) ? d : 0;
+}
+function abStep(dx, dy){
+  const d = abMoveDist();
+  if (d) moveSelectionBy(dx*d, dy*d);
+}
+document.getElementById("ab-mv-left").addEventListener("click",  ()=>abStep(-1,0));
+document.getElementById("ab-mv-right").addEventListener("click", ()=>abStep(1,0));
+document.getElementById("ab-mv-up").addEventListener("click",    ()=>abStep(0,-1));  // 画面の縦は下が＋
+document.getElementById("ab-mv-down").addEventListener("click",  ()=>abStep(0,1));
 document.getElementById("ab-dup").addEventListener("click", duplicateSelection);
 document.getElementById("ab-fliph").addEventListener("click", ()=>flipSelection("h"));
 document.getElementById("ab-flipv").addEventListener("click", ()=>flipSelection("v"));
