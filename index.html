@@ -40,6 +40,13 @@
   #toolbar input[type="number"] { width: 50px; padding: 3px 4px; border-radius: 4px; border: 1px solid #4b5563; }
   .ctx { display: none; align-items: center; gap: 8px; }
   .ctx.show { display: flex; }
+  /* かんたん計算機 */
+  .calc { display: flex; align-items: center; gap: 5px; font-size: 13px; }
+  .calc input[type="text"] { padding: 3px 6px; border-radius: 4px; border: 1px solid #4b5563;
+    background: #374151; color: #f9fafb; font-size: 13px; }
+  .calc input#calc-result { background: #111827; color: #7dd3fc; font-weight: 700; cursor: pointer; text-align: right; }
+  .calc input#calc-input.bad { border-color: #f87171; }
+  #calc-eq { opacity: .7; }
   /* menu dropdown */
   #menu-wrap { position: relative; }
   /* 上のバーは横スクロールする（overflow-y:hidden）ので、その中に置くと
@@ -396,6 +403,18 @@
       <label title="パーツ同士の角・辺に吸着"><input type="checkbox" id="chk-magnet" checked>🧲吸着</label>
       <label title="ポイント（白い■・●）を表示する。合印を入れるときは、吸着できる場所が点で見えます"><input type="checkbox" id="chk-points" checked>◦ポイント</label>
     </span>
+    <!-- 選択ツールで何も選んでいない時：かんたん計算機 -->
+    <span class="ctx" id="ctx-calc">
+      <span class="sep"></span>
+      <span class="calc" title="式を打って Enter（例 100+50*2、120/2、寸法の足し引きに）">
+        🧮<input type="text" id="calc-input" placeholder="式を入力（100+50 など）" autocomplete="off"
+             inputmode="text" style="width:150px">
+        <span id="calc-eq">=</span>
+        <input type="text" id="calc-result" readonly placeholder="答え" style="width:90px" title="ここをクリックでコピー">
+        <button id="calc-copy" title="答えをコピー">📋 コピー</button>
+        <button id="calc-clear" title="消す">✕</button>
+      </span>
+    </span>
     <!-- 編集ツールの時だけ：接円弧 -->
     <span class="ctx" id="ctx-meas">
       <span class="sep"></span>
@@ -724,6 +743,17 @@
       </ul>
       <p>両端の点が同じだけ動くので、辺の角度と長さは変わりません。
       曲がり方も、辺に付いている合印もそのままです。</p>
+
+      <h3>🧮 かんたん計算機</h3>
+      <p>選択ツールにして<b>何も選んでいないとき</b>、上のバーに計算機が出ます。
+      式を打って <b>Enter</b> を押すと答えが出て、そのまま<b>コピー</b>されます。
+      （寸法の足し引き、半分の計算などにどうぞ）</p>
+      <ul>
+        <li>例：<b>450-10-10</b>（両側の縫い代を引く）、<b>(1800-30)/2</b>（半分）</li>
+        <li>＋ − × ÷ とかっこが使えます（×は * や ÷、全角の数字でもOK）</li>
+        <li><b>📋 コピー</b>ボタン、または<b>答えの欄をクリック</b>でもコピーできます</li>
+        <li><b>✕</b>で消せます</li>
+      </ul>
 
       <h3>スナップ（格子への吸着）</h3>
       <p><b>スナップ</b>は、格子の線の<b>近くに来たときだけ</b>吸い寄せます。
@@ -3183,6 +3213,9 @@ function updateModeBadge(){
 }
 function updateContextBar(){
   document.getElementById("ctx-common").classList.add("show");
+  // 計算機は「選択ツールで、何も選んでいない・辺も選んでいない」時だけ出す
+  const calcOn = tool==="select" && !multiSel.length && !selTexts.length && !selEdge && !selectedPartId;
+  document.getElementById("ctx-calc").classList.toggle("show", calcOn);
   updateEdgeBar();          // 辺を選んでいる時だけ、角度と長さの欄を出す
   document.getElementById("ctx-meas").classList.toggle("show", isMeasTool());
   if (isMeasTool()){
@@ -5570,6 +5603,82 @@ document.addEventListener("click", (e)=>{
 });
 document.getElementById("chk-snap").addEventListener("change", render);
 document.getElementById("chk-points").addEventListener("change", render);
+
+// ===== かんたん計算機 =====
+// eval は使わない（危ないので）。式を自分で読んで、+ - * × ÷ / ( ) と小数だけを計算する。
+// ×は*、÷は/、、（全角）も受け付ける。空欄なら答えも空。
+function calcEval(src){
+  let s = String(src)
+    .replace(/[×✕]/g, "*").replace(/[÷]/g, "/")
+    .replace(/，/g, ",").replace(/[（(]/g, "(").replace(/[）)]/g, ")")
+    .replace(/[０-９．＋－/／]/g, ch => "０１２３４５６７８９．＋－／".indexOf(ch)>=0
+        ? "0123456789.+-/".charAt("０１２３４５６７８９．＋－／".indexOf(ch)) : ch)
+    .replace(/[ ,\t]/g, "");
+  if (!s) return { ok:true, value:null };
+  if (!/^[0-9.+\-*/()]+$/.test(s)) return { ok:false };
+  // 演算子が2つ以上つながっているのは打ち間違い（100++50 など）。※-はマイナス符号で使うので除く
+  if (/[+*/]{2,}|[+\-*/]\)|\([*/]/.test(s)) return { ok:false };
+  let i = 0;
+  const peek = ()=> s[i];
+  // 式 = 項 (+|- 項)*
+  function expr(){
+    let v = term();
+    while (peek()==="+" || peek()==="-"){ const op=s[i++]; const t=term(); v = op==="+" ? v+t : v-t; }
+    return v;
+  }
+  // 項 = 因子 (*|/ 因子)*
+  function term(){
+    let v = factor();
+    while (peek()==="*" || peek()==="/"){ const op=s[i++]; const f=factor(); v = op==="*" ? v*f : v/f; }
+    return v;
+  }
+  // 因子 = 数 | (式) | -因子
+  function factor(){
+    if (peek()==="-"){ i++; return -factor(); }
+    if (peek()==="+"){ i++; return factor(); }
+    if (peek()==="("){ i++; const v=expr(); if (peek()!==")") throw 0; i++; return v; }
+    let n = "";
+    while (i<s.length && /[0-9.]/.test(s[i])) n += s[i++];
+    if (n==="" || n==="." || (n.match(/\./g)||[]).length>1) throw 0;
+    return parseFloat(n);
+  }
+  try {
+    const v = expr();
+    if (i !== s.length || !isFinite(v)) return { ok:false };
+    return { ok:true, value:v };
+  } catch(e){ return { ok:false }; }
+}
+// きれいに表示（小数は最大4桁、余分な0は消す）
+function calcFmt(v){
+  if (v===null) return "";
+  const r = Math.round(v*1e4)/1e4;
+  return (Object.is(r,-0) ? 0 : r).toString();
+}
+(function(){
+  const inp = document.getElementById("calc-input");
+  const res = document.getElementById("calc-result");
+  const run = ()=>{
+    const r = calcEval(inp.value);
+    inp.classList.toggle("bad", !r.ok && inp.value.trim()!=="");
+    res.value = r.ok ? calcFmt(r.value) : "";
+  };
+  inp.addEventListener("input", run);
+  inp.addEventListener("keydown", (e)=>{
+    if (e.key==="Enter"){ e.preventDefault(); run(); if (res.value) copyCalc(); }
+  });
+  function copyCalc(){
+    if (!res.value) return;
+    const done = ()=> toast("答え「"+res.value+"」をコピーしました");
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(res.value).then(done, ()=>{ res.select(); document.execCommand&&document.execCommand("copy"); done(); });
+    } else { res.select(); document.execCommand&&document.execCommand("copy"); done(); }
+  }
+  document.getElementById("calc-copy").addEventListener("click", copyCalc);
+  res.addEventListener("click", ()=>{ res.select(); copyCalc(); });   // 答えの欄をクリックでもコピー
+  document.getElementById("calc-clear").addEventListener("click", ()=>{
+    inp.value=""; res.value=""; inp.classList.remove("bad"); inp.focus();
+  });
+})();
 document.getElementById("chk-dim").addEventListener("change", render);
 document.getElementById("grid-size").addEventListener("input", render);
 // ? ボタン＝使い方を開く。画面下のヒント帯は、その中のチェックで出し入れする。
