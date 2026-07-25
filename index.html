@@ -6560,14 +6560,23 @@ function libThumb(obj){
   for (const p of parts){
     const nodes = p.nodes || [];
     if (nodes.length < 2) continue;
-    // 曲線も直線でつないで十分（小さい絵なので違いは見えない）
-    let d = "M" + nodes.map(n=>n.x.toFixed(1)+" "+n.y.toFixed(1)).join(" L");
+    // 曲線も曲線のまま描く（小さくても形が分かるように）
+    let d;
+    try {
+      const flat = flattenNodes(nodes, !!p.closed, 8);
+      d = "M" + flat.map(n=>n.x.toFixed(1)+" "+n.y.toFixed(1)).join(" L");
+    } catch(e){
+      d = "M" + nodes.map(n=>n.x.toFixed(1)+" "+n.y.toFixed(1)).join(" L");
+    }
     if (p.closed) d += " Z";
     const isLine = !!p.kind;
-    const col = isLine ? (p.kind==="stitch" ? "#dc2626" : "#6b7280") : ((p.stroke||p.color) || "#2563eb");
+    const col = isLine ? (p.kind==="stitch" ? "#dc2626" : "#94a3b8") : ((p.stroke||p.color) || "#2563eb");
+    // 塗りはごく薄く。濃いままだと重なった所が真っ黒に潰れて形が読めない。
     const fill = (!isLine && p.closed && p.fill && p.fill!=="none") ? p.fill : "none";
-    seg.push('<path d="'+d+'" fill="'+fill+'" fill-opacity="0.12" stroke="'+col
-           + '" stroke-width="'+(Math.max(w,h)/220).toFixed(2)+'" vector-effect="non-scaling-stroke"/>');
+    // vector-effect="non-scaling-stroke" のとき、太さは「画面のドット数」で効く。
+    // 図面の大きさで割ると数ドットの極太線になり、塗り潰れてしまう。
+    seg.push('<path d="'+d+'" fill="'+fill+'" fill-opacity="0.06" stroke="'+col
+           + '" stroke-width="'+(isLine ? 0.7 : 1)+'" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>');
   }
   return '<svg viewBox="'+x0.toFixed(1)+' '+y0.toFixed(1)+' '+w.toFixed(1)+' '+h.toFixed(1)
        + '" preserveAspectRatio="xMidYMid meet">'+seg.join("")+'</svg>';
