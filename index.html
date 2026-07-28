@@ -567,7 +567,10 @@
       <label title="文字の色"><input type="color" id="text-color" value="#111827" style="width:26px;height:22px;padding:0;border:1px solid #4b5563;border-radius:4px;background:none"></label>
     </span>
     <span class="spacer"></span>
-    <span id="file-label" style="display:none;opacity:.8;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis"></span>
+    <input type="text" id="proj-name" placeholder="図面の名前" autocomplete="off"
+           title="この図面の名前。一覧・印刷・保存するときの名前になります"
+           style="width:150px;padding:3px 7px;border-radius:4px;border:1px solid #4b5563;background:#374151;color:#f9fafb;font-size:13px">
+    <span id="file-label" style="display:none;opacity:.8;white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis"></span>
     <span id="save-state" style="display:none;color:#fca5a5;font-weight:700;white-space:nowrap"
           title="このブラウザに自動保存できていません。メニューの💾保存でファイルに残してください"></span>
     <button id="btn-help" title="使い方">?</button>
@@ -1150,17 +1153,59 @@ function withRiders(list){
 
 // 選択を動かすときの控え。点が全部選ばれているパーツは合印も一緒に動かす
 // （置き去りにすると、見えている場所と保存位置がずれて合印を消せなくなる）
+// ===== 合印の付いていく仕組み =====
+// 合印は「座標」ではなく「輪郭のどの辺の、どのあたり」で覚える。
+// 座標のまま動かすと、点を一部だけ動かして形を変えたときに置き去りになる。
+// （たとえば上辺だけを持ち上げると、合印だけ元の高さに残ってしまう）
+// 辺の中での位置で覚えておけば、辺がどう動いても、その辺に付いてくる。
+function outlineParamOf(part, pt){
+  const fi = flattenNodesIndexed(part.nodes, part.closed, 24);
+  const pts = fi.pts;
+  let best = { d: Infinity, i: 0, t: 0 };
+  fi.range.forEach((rg, i)=>{
+    const end = (rg.end===0 && part.closed) ? pts.length : rg.end;
+    const count = end - rg.start;
+    if (count <= 0) return;
+    for (let k=rg.start; k<end; k++){
+      const a = pts[k], b = pts[(k+1)%pts.length];
+      const dx=b.x-a.x, dy=b.y-a.y, L2=dx*dx+dy*dy||1;
+      let u=((pt.x-a.x)*dx+(pt.y-a.y)*dy)/L2; u=Math.max(0,Math.min(1,u));
+      const d=Math.hypot(pt.x-(a.x+dx*u), pt.y-(a.y+dy*u));
+      if (d<best.d) best = { d, i, t:(k-rg.start+u)/count };
+    }
+  });
+  return best;
+}
+// 「どの辺の、どのあたり」から、いまの座標を出す
+function outlinePointAt(part, i, t){
+  const sc = segControls(part.nodes, i, part.closed);
+  if (sc.straight) return { x: sc.A.x + (sc.B.x-sc.A.x)*t, y: sc.A.y + (sc.B.y-sc.A.y)*t };
+  return bezierAt(sc, t);
+}
+// 動かす前に控える。list に入っているパーツの合印だけが対象。
 function captureNotches(list){
-  const cnt = {};
-  for (const m of list) cnt[m.partId] = (cnt[m.partId]||0) + 1;
+  const ids = new Set((list||[]).map(m=>m.partId));
   const out = [];
-  for (const pid in cnt){
-    const p = project.parts.find(pp=>pp.id===pid);
-    if (!p || !p.notches || !p.notches.length) continue;
-    if (cnt[pid] < p.nodes.length) continue;   // 一部だけ動かす時は輪郭に貼り付いたままにする
-    p.notches.forEach((q,i)=>out.push({ partId:pid, i, x:q.x, y:q.y }));
+  for (const id of ids){
+    const p = project.parts.find(q=>q.id===id);
+    if (!p || !p.notches || !p.notches.length || p.nodes.length < 2) continue;
+    p.notches.forEach((nt, k)=>{
+      const pr = outlineParamOf(p, nt);
+      out.push({ partId:id, k, i:pr.i, t:pr.t });
+    });
   }
   return out;
+}
+// 動かした後に、控えた位置から座標を計算し直す
+function applyNotches(saved){
+  for (const o of (saved||[])){
+    const p = project.parts.find(q=>q.id===o.partId);
+    if (!p || !p.notches || !p.notches[o.k] || p.nodes.length < 2) continue;
+    const segCount = p.closed ? p.nodes.length : p.nodes.length-1;
+    if (o.i >= segCount) continue;                 // 点が減って辺が無くなった時は触らない
+    const pt = outlinePointAt(p, o.i, o.t);
+    p.notches[o.k].x = pt.x; p.notches[o.k].y = pt.y;
+  }
 }
 function makeSelMove(wp, list, textIds){
   captureSymPairs(list);                          // 左右対称の相手を先に控える
@@ -1172,7 +1217,8 @@ function makeSelMove(wp, list, textIds){
     orig: list.map(m=>{ const nd=nodeOf(m); return { partId:m.partId, idx:m.idx, hole:m.hole, x:nd.x, y:nd.y }; }),
     origTexts: ids.map(id=>{ const t=project.texts.find(x=>x.id===id); return t?{id, x:t.x, y:t.y}:null; }).filter(Boolean),
     origNotches: captureNotches(list),
-    origHoles: captureHoles(list) };
+    origHoles: captureHoles(list),
+    origDims: dimPartsIn(list).map(p=>({ partId:p.id, mpos:p.mpos })) };
 }
 // 穴はパーツの一部。パーツをまるごと動かすときは、穴も同じだけ動かす。
 // （点を1つだけ動かしている時は動かさない）
@@ -1384,10 +1430,22 @@ function rotateSelection(deg){
   const c=selCentroid(), rad=deg*Math.PI/180, cos=Math.cos(rad), sin=Math.sin(rad);
   const rot=(p)=>({ x:c.x+(p.x-c.x)*cos-(p.y-c.y)*sin, y:c.y+(p.x-c.x)*sin+(p.y-c.y)*cos });
   const rotOff=(o)=> o?{ x:o.x*cos-o.y*sin, y:o.x*sin+o.y*cos }:null;
+  // 周長の寸法線は水平／垂直に固定なので、回すと向きが合わなくなる。
+  // せめて置き去りにならないよう、パーツの真ん中からの離れ具合を保って付いていかせる。
+  const dimKeep = dimPartsIn(multiSel).map(p=>{
+    const mid = (p.maxis==="h") ? (p.nodes[0].y+p.nodes[1].y)/2 : (p.nodes[0].x+p.nodes[1].x)/2;
+    return { p, gap: p.mpos - mid };
+  });
+  const rotNotches = captureNotches(multiSel);   // 合印は動かす前に控える
   for (const m of multiSel){ const nd=nodeOf(m); if(nd){ const p=rot(nd); nd.x=p.x; nd.y=p.y; nd.hIn=rotOff(nd.hIn); nd.hOut=rotOff(nd.hOut); } }
-  // 合印と穴も一緒に回す
+  for (const d of dimKeep){
+    const mid = (d.p.maxis==="h") ? (d.p.nodes[0].y+d.p.nodes[1].y)/2 : (d.p.nodes[0].x+d.p.nodes[1].x)/2;
+    d.p.mpos = mid + d.gap;
+  }
+  // 合印は輪郭の上に置き直す（回した後の形に合わせる）
+  applyNotches(rotNotches);
+  // 穴も一緒に回す
   for (const part of wholePartsInSel()){
-    if (part.notches) part.notches = part.notches.map(rot);
     for (const h of (part.holes||[])) for (const nd of h){
       const p=rot(nd); nd.x=p.x; nd.y=p.y; nd.hIn=rotOff(nd.hIn); nd.hOut=rotOff(nd.hOut);
     }
@@ -1414,14 +1472,20 @@ function flipSelection(axis){
   const c=selCentroid();
   const fp=(p)=> axis==="h" ? { x:2*c.x-p.x, y:p.y } : { x:p.x, y:2*c.y-p.y };
   const fo=(o)=> o ? (axis==="h" ? { x:-o.x, y:o.y } : { x:o.x, y:-o.y }) : null;
+  const flipNotches = captureNotches(multiSel);   // 合印は動かす前に控える
   for (const m of multiSel){ const nd=nodeOf(m); if(nd){ const p=fp(nd); nd.x=p.x; nd.y=p.y; nd.hIn=fo(nd.hIn); nd.hOut=fo(nd.hOut); } }
-  // 合印と穴も一緒に反転する。置き去りにすると輪郭の別の場所へ移ってしまう。
+  // 合印は輪郭の上に置き直す。置き去りにすると輪郭の別の場所へ移ってしまう。
+  applyNotches(flipNotches);
   for (const part of wholePartsInSel()){
-    if (part.notches) part.notches = part.notches.map(fp);
     for (const h of (part.holes||[])) for (const nd of h){
       const p=fp(nd); nd.x=p.x; nd.y=p.y; nd.hIn=fo(nd.hIn); nd.hOut=fo(nd.hOut);
     }
     resyncSymAxis(part);
+  }
+  // 周長の寸法線を通す位置も鏡にする
+  for (const p of dimPartsIn(multiSel)){
+    if (p.maxis==="h" && axis==="v") p.mpos = 2*c.y - p.mpos;
+    if (p.maxis==="v" && axis==="h") p.mpos = 2*c.x - p.mpos;
   }
   // 文字も（パーツごと反転しているので位置だけ合わせる）
   for (const id of selTexts){ const t=project.texts.find(x=>x.id===id); if (t){ const q=fp(t); t.x=q.x; t.y=q.y; } }
@@ -1621,6 +1685,27 @@ function moveEdgePerp(out){
 }
 // 選んでいる点・パーツを、まとめて平行に動かす。
 // ドラッグと同じことを、数字で正確にやるためのもの。
+// 周長の書き込み（水平・垂直に固定した寸法線）は、線を通す位置を
+// 世界座標 mpos で覚えている。パーツを動かしたり変形したりしたら、これも一緒に動かす。
+// 忘れると、寸法線だけ元の場所に取り残される。
+// list に入っているパーツのうち、mpos を持つものだけが対象。
+function dimPartsIn(list){
+  const ids = new Set((list||[]).map(m=>m.partId));
+  return project.parts.filter(p=>ids.has(p.id) && p.maxis && p.mpos!==undefined);
+}
+function shiftDimPos(list, dx, dy){
+  for (const p of dimPartsIn(list)) p.mpos += (p.maxis==="h") ? dy : dx;
+}
+function scaleDimPos(list, anchor, sx, sy){
+  for (const p of dimPartsIn(list)){
+    if (p.maxis==="h") p.mpos = anchor.y + (p.mpos-anchor.y)*sy;
+    else               p.mpos = anchor.x + (p.mpos-anchor.x)*sx;
+    // 周長は輪郭に沿った長さなので2点からは測り直せない。伸ばしたぶんだけ数字も伸ばす。
+    const f = Math.abs(p.maxis==="h" ? sx : sy);
+    const num = parseFloat(String(p.mlabel||"").replace(/[^0-9.]/g,""));
+    if (isFinite(num) && isFinite(f) && f>0) p.mlabel = fmtMM(num*f);
+  }
+}
 function moveSelectionBy(dx, dy){
   if (!multiSel.length && !selTexts.length) return false;
   if (!isFinite(dx) || !isFinite(dy) || (dx===0 && dy===0)) return false;
@@ -1634,19 +1719,16 @@ function moveSelectionBy(dx, dy){
   }
   applyMirrorToNodes(multiSel);              // 左右対称なら反対側も
   clearSymPairs();
-  for (const o of notches){
-    const p = project.parts.find(pp=>pp.id===o.partId);
-    if (p && p.notches && p.notches[o.i]){ p.notches[o.i].x = o.x + dx; p.notches[o.i].y = o.y + dy; }
-  }
+  applyNotches(notches);                     // 合印は動いた輪郭の上に置き直す
   for (const o of holes){
     const nd = holeNodeOf(o);
     if (nd){ nd.x = o.x + dx; nd.y = o.y + dy; }
   }
+  shiftDimPos(multiSel, dx, dy);             // 周長の寸法線の位置も一緒に
   for (const id of selTexts){
     const t = project.texts.find(x=>x.id===id);
     if (t){ t.x += dx; t.y += dy; }
   }
-  resnapMovedNotches(multiSel);              // 一部だけ動かした時は輪郭に貼り直す
   resyncSymAxisFor(multiSel);                // 対称の軸も付いていく
   saveLocal(); render();
   return true;
@@ -1858,6 +1940,8 @@ function pasteClipboard(){
     c.id = "p"+(idCounter++);
     c.nodes = c.nodes.map(nd => ({ x:nd.x+dx, y:nd.y+dy, hIn:nd.hIn, hOut:nd.hOut }));
     if (c.notches) c.notches = c.notches.map(q => ({ x:q.x+dx, y:q.y+dy }));
+    if (c.holes) c.holes = c.holes.map(h => h.map(nd => ({ x:nd.x+dx, y:nd.y+dy, hIn:nd.hIn, hOut:nd.hOut })));
+    if (c.mpos!==undefined) c.mpos += (c.maxis==="h" ? dy : dx);   // 周長の寸法線の位置も
     if (src.group){                       // pasted copies keep their grouping, as a new group
       if (!groupMap.has(src.group)) groupMap.set(src.group, "g"+(idCounter++));
       c.group = groupMap.get(src.group);
@@ -1928,10 +2012,11 @@ function beginScale(h, wp){
     h, anchor:{ x:h.ax, y:h.ay }, from:{ x:h.x, y:h.y },
     nodes: multiSel.map(m=>{ const nd=nodeOf(m); return { partId:m.partId, idx:m.idx, hole:m.hole, x:nd.x, y:nd.y,
       hIn: nd.hIn?{...nd.hIn}:null, hOut: nd.hOut?{...nd.hOut}:null }; }),
-    notches: partIds.flatMap(id=>{ const p=project.parts.find(pp=>pp.id===id);
-      return (p&&p.notches)? p.notches.map((q,i)=>({partId:id, i, x:q.x, y:q.y})) : []; }),
+    notches: captureNotches(multiSel),
     holes: captureHoles(multiSel).map(o=>{ const nd=holeNodeOf(o);
       return { ...o, hIn: nd&&nd.hIn?{...nd.hIn}:null, hOut: nd&&nd.hOut?{...nd.hOut}:null }; }),
+    dims: dimPartsIn(multiSel).map(p=>({ partId:p.id, mpos:p.mpos,
+      num: parseFloat(String(p.mlabel||"").replace(/[^0-9.]/g,"")) })),
     texts: selTexts.map(id=>{ const t=project.texts.find(x=>x.id===id); return t?{id, x:t.x, y:t.y, size:t.size||20}:null; }).filter(Boolean)
   };
 }
@@ -1954,15 +2039,19 @@ function applyScale(shift){
     nd.hIn  = o.hIn  ? { x:o.hIn.x*sx,  y:o.hIn.y*sy }  : null;
     nd.hOut = o.hOut ? { x:o.hOut.x*sx, y:o.hOut.y*sy } : null;
   }
-  for (const o of d.notches){
-    const p = project.parts.find(pp=>pp.id===o.partId);
-    if (p && p.notches && p.notches[o.i]){ p.notches[o.i].x = a.x+(o.x-a.x)*sx; p.notches[o.i].y = a.y+(o.y-a.y)*sy; }
-  }
+  applyNotches(d.notches);                        // 合印は伸びた輪郭の上に置き直す
   for (const o of (d.holes||[])){                 // 穴もパーツと同じだけ伸び縮みさせる
     const nd = holeNodeOf(o); if (!nd) continue;
     nd.x = a.x + (o.x-a.x)*sx;  nd.y = a.y + (o.y-a.y)*sy;
     nd.hIn  = o.hIn  ? { x:o.hIn.x*sx,  y:o.hIn.y*sy }  : null;
     nd.hOut = o.hOut ? { x:o.hOut.x*sx, y:o.hOut.y*sy } : null;
+  }
+  // 周長の寸法線を通す位置と数値も、伸び縮みに合わせる（控えた元の値から計算する）
+  for (const o of (d.dims||[])){
+    const p = project.parts.find(pp=>pp.id===o.partId); if (!p) continue;
+    p.mpos = (p.maxis==="h") ? a.y + (o.mpos-a.y)*sy : a.x + (o.mpos-a.x)*sx;
+    const f = Math.abs(p.maxis==="h" ? sx : sy);
+    if (isFinite(o.num) && isFinite(f) && f>0) p.mlabel = fmtMM(o.num*f);
   }
   const fs = (Math.abs(sx)+Math.abs(sy))/2;
   for (const o of d.texts){
@@ -2901,8 +2990,16 @@ function drawDimension(frag, part){
     addArrowHead(frag, sa, sb, col, 9);
     addArrowHead(frag, sb, sa, col, 9);
   }
-  // 数値。計測の書き込みは測った値のまま、寸法線ツールは2点間の長さを出す
-  const label = part.mlabel || fmtMM(L);
+  // 数値は、そのつど測り直して出す。
+  // 書いた時の数字を持ち回ると、パーツを変形したときに古い数字が残り、
+  // 図面と食い違ってしまう（実際に起きていた不具合）。
+  //  ・直線距離／寸法線 … 2点の間の長さがそのまま答え
+  //  ・アール（R○○）  … 2点は「中心」と「円弧の上の点」なので、その間の長さが半径
+  //  ・周長（maxis）    … 輪郭に沿った長さなので2点からは測り直せない。
+  //                       変形したぶんは mlabel 側を伸び縮みさせて合わせている。
+  const label = part.maxis ? (part.mlabel || fmtMM(L))
+              : part.mone  ? ("R" + fmtMM(L).replace("mm",""))
+              : fmtMM(L);
   const mid = { x:(A2.x+B2.x)/2, y:(A2.y+B2.y)/2 };
   const sm = worldToScreen({ x:mid.x+px*3.5, y:mid.y+py*3.5 });
   const t = mk("text", { x:sm.x, y:sm.y, class:"dimtext", fill:col, "text-anchor":"middle" });
@@ -3521,6 +3618,7 @@ function render(viewOnly){
     updateModeBadge();
     updateContextBar();
     updateActionBar();
+    updateProjName();        // 図面の名前を欄に映す
   }
   updateHint();
   document.getElementById("readout").textContent =
@@ -4271,6 +4369,7 @@ function duplicatePart(part, dx, dy){
   copy.nodes = copy.nodes.map(nd => ({ x:nd.x+dx, y:nd.y+dy, hIn:nd.hIn, hOut:nd.hOut }));
   if (copy.notches) copy.notches = copy.notches.map(p => ({ x:p.x+dx, y:p.y+dy }));
   if (copy.holes) copy.holes = copy.holes.map(h => h.map(nd => ({ x:nd.x+dx, y:nd.y+dy, hIn:nd.hIn, hOut:nd.hOut })));
+  if (copy.mpos!==undefined) copy.mpos += (copy.maxis==="h" ? dy : dx);  // 周長の寸法線の位置も
   if (copy.symAxis!==undefined) copy.symAxis += dx;     // 左右対称の軸も一緒に運ぶ
   delete copy.symPair;
   project.parts.push(copy);
@@ -4986,15 +5085,18 @@ svg.addEventListener("mousemove", (e)=>{
     for (const o of selMove.orig){ const nd = nodeOf(o); if (nd){ nd.x = o.x + dwx; nd.y = o.y + dwy; } }
     applyMirrorToNodes(selMove.orig);            // 左右対称なら反対側も同じように
     for (const o of (selMove.origTexts||[])){ const t = project.texts.find(x=>x.id===o.id); if (t){ t.x = o.x + dwx; t.y = o.y + dwy; } }
-    // 合印も一緒に動かす（置き去りにすると見えている場所と保存位置がずれる）
-    for (const o of (selMove.origNotches||[])){
-      const p = project.parts.find(pp=>pp.id===o.partId);
-      if (p && p.notches && p.notches[o.i]){ p.notches[o.i].x = o.x + dwx; p.notches[o.i].y = o.y + dwy; }
-    }
+    // 合印は「輪郭のどのあたり」で覚えてあるので、動いた輪郭から座標を出し直す。
+    // 一部の点だけ動かして形を変えても、合印がその辺に付いてくる。
+    applyNotches(selMove.origNotches);
     // 穴も一緒に動かす（パーツの一部なので置き去りにしてはいけない）
     for (const o of (selMove.origHoles||[])){
       const nd = holeNodeOf(o);
       if (nd){ nd.x = o.x + dwx; nd.y = o.y + dwy; }
+    }
+    // 周長の寸法線を通す位置も一緒に。控えた元の値から動かす（何度も足さないように）
+    for (const o of (selMove.origDims||[])){
+      const p = project.parts.find(pp=>pp.id===o.partId);
+      if (p) p.mpos = o.mpos + (p.maxis==="h" ? dwy : dwx);
     }
     renderThrottled();
     return;
@@ -5673,6 +5775,24 @@ document.addEventListener("click", (e)=>{
 });
 document.getElementById("chk-snap").addEventListener("change", render);
 document.getElementById("chk-points").addEventListener("change", render);
+
+// ===== 図面の名前 =====
+// 上のバーの欄で付ける。一覧に出る名前・印刷の見出し・保存するときのファイル名になる。
+function updateProjName(){
+  const el = document.getElementById("proj-name");
+  if (!el || document.activeElement === el) return;   // 打っている最中は書き換えない
+  el.value = (project.name && project.name !== "無題" && project.name !== "無題の図面")
+    ? project.name : "";
+}
+(function(){
+  const el = document.getElementById("proj-name");
+  el.addEventListener("input", ()=>{
+    project.name = el.value.trim() || "無題";
+    saveLocal();
+  });
+  el.addEventListener("change", ()=>{ saveLocal(); });
+  el.addEventListener("keydown", (e)=>{ if (e.key==="Enter"){ e.preventDefault(); el.blur(); } });
+})();
 
 // ===== かんたん計算機 =====
 // eval は使わない（危ないので）。式を自分で読んで、+ - * × ÷ / ( ) と小数だけを計算する。
@@ -6661,6 +6781,12 @@ function applyLoaded(obj, name){
   // 忘れないと「💾 保存」が、さっきまで開いていた別のファイルを上書きしてしまう。
   fileHandle = null; fileHandleName = ""; updateFileLabel();
   project = obj;
+  // 名前が付いていない図面は、ファイル名をそのまま名前にする。
+  // こうしないと一覧が「無題」だらけになって見分けられない。
+  const cur = (project.name || "").trim();
+  if ((!cur || cur === "無題" || cur === "無題の図面") && name){
+    project.name = name.replace(/\.json$/i, "");
+  }
   normalizeAllParts();
   idCounter = Math.max(1, ...project.parts.map(p=>parseInt((p.id||"p0").slice(1))||0)) + 1;
   selectedPartId = null; draft = null; multiSel = []; selTexts = []; selVertex = null; selEdge = null;
@@ -6774,8 +6900,9 @@ function libDraw(){
         const file = await f.handle.getFile();
         const obj = JSON.parse(await file.text());
         card.querySelector(".lb-thumb").innerHTML = libThumb(obj);
+        // 名前が付いていなければ、ファイル名のまま出す（「無題」とは出さない）
         const nm = (obj.name||"").trim();
-        if (nm) card.querySelector(".lb-name").textContent = nm;
+        if (nm && nm!=="無題" && nm!=="無題の図面") card.querySelector(".lb-name").textContent = nm;
         const n = (obj.parts||[]).length;
         card.querySelector(".lb-meta span").textContent = libFmtTime(f.time) + "・" + n + "枚";
       } catch(e){
