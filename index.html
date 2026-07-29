@@ -1579,17 +1579,30 @@ function deleteSelection(){
   }
   multiSel=[]; selectedPartId=null; saveLocal(); render();
 }
-// Is the whole part (all its nodes) currently selected?
 // 囲んで選んだあとの後始末。
-// 2枚以上にまたがって囲んだときは「パーツを並べ替えたい」場面なので、
-// 端がはみ出したパーツも点を全部選び直して、まるごと動くようにする。
-// これをしないと、はみ出したパーツだけが引き伸ばされて形が変わる。
-// 1枚の中だけを囲んだときは「形を直したい」場面なので、点の選択のまま残す。
-// Altを押しながら離せば、いつでも点の選択のままにできる。
+//
+// 何枚にまたがって囲んでも、囲んだ点だけが選ばれる（複数のパーツの下側だけを
+// まとめて変形する、といった使い方ができるように）。
+//
+// ただし「まるごと囲むつもりで、枠がほんの少し足りなかった」時だけは、
+// そのパーツを全部選び直す。これをしないと、はみ出した数点が置き去りになって
+// そのパーツだけ引き伸ばされ、形が崩れてしまう（実際に起きていた不具合）。
+// 見分け方：入りきらなかった点が「枠のすぐ外」に全部あるなら囲み損ね、
+// 遠くにあるなら、わざと一部だけ選んでいると見なす。
+// Altを押しながら離せば、囲み損ねでも点の選択のままにできる。
+const MARQUEE_MISS_PX = 14;                        // 「枠のすぐ外」とみなす幅
 function growMarqueeToWholeParts(keepPoints){
-  if (keepPoints) return 0;
+  if (keepPoints || !marquee) return 0;
   const ids = [...new Set(multiSel.map(m=>m.partId))];
   if (ids.length < 2) return 0;
+  const box = { x0:Math.min(marquee.x0,marquee.x1), x1:Math.max(marquee.x0,marquee.x1),
+                y0:Math.min(marquee.y0,marquee.y1), y1:Math.max(marquee.y0,marquee.y1) };
+  const outDist = (nd)=>{                          // 枠からどれだけ外に出ているか（画面px）
+    const s = worldToScreen(nd);
+    const dx = Math.max(box.x0-s.x, 0, s.x-box.x1);
+    const dy = Math.max(box.y0-s.y, 0, s.y-box.y1);
+    return Math.hypot(dx, dy);
+  };
   let grown = 0;
   const picked = new Set(multiSel.map(m=>m.partId+":"+m.idx+":"+m.hole));
   for (const id of ids){
@@ -1597,6 +1610,10 @@ function growMarqueeToWholeParts(keepPoints){
     if (!p) continue;
     const have = multiSel.filter(m=>m.partId===id && !isHoleSel(m)).length;
     if (have >= p.nodes.length) continue;          // すでに全部入っている
+    // 外れた点が1つでも枠から離れていたら、わざと一部だけ選んでいる
+    const nearMiss = p.nodes.every((nd,i)=>
+      picked.has(id+":"+i+":undefined") || outDist(nd) <= MARQUEE_MISS_PX);
+    if (!nearMiss) continue;
     grown++;
     p.nodes.forEach((_,i)=>{
       const k = id+":"+i+":undefined";
@@ -1610,7 +1627,7 @@ function growMarqueeToWholeParts(keepPoints){
   }
   if (grown){
     selMode = "part";
-    toast(`はみ出していた${grown}枚も、まるごと選びました（形が崩れないように）`);
+    toast(`枠から少しはみ出していた${grown}枚は、まるごと選びました（形が崩れないように）`);
   }
   return grown;
 }
