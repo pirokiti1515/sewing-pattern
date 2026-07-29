@@ -281,6 +281,8 @@
     display: none; position: absolute; z-index: 30; min-width: 150px;
     background: #1f2937; border: 1px solid #4b5563; border-radius: 8px; padding: 6px;
     box-shadow: 0 6px 20px rgba(0,0,0,.4);
+    /* 項目が多くて画面に収まらない時は、中でスクロールできるようにする */
+    max-height: calc(100% - 12px); overflow-y: auto; overscroll-behavior: contain;
   }
   #context-menu.show { display: block; }
   #context-menu button {
@@ -1149,13 +1151,18 @@ let selMove = null;         // {startW, orig:[{partId,idx,x,y}], origTexts, orig
 // 親子関係は持たせないので、線だけを選んで単体で動かすのも今までどおりできる。
 const RIDER_KINDS = ["zip","stitch","arrow","dim"];
 function ridersOf(partIds){
-  const hosts = partIds.map(id=>project.parts.find(p=>p.id===id))
-                       .filter(p=>p && p.closed && p.nodes.length>=3)
-                       .map(p=>flattenNodes(p.nodes, true));
-  if (!hosts.length) return [];
+  const hostParts = partIds.map(id=>project.parts.find(p=>p.id===id)).filter(Boolean);
+  const hosts = hostParts.filter(p=>p.closed && p.nodes.length>=3)
+                         .map(p=>flattenNodes(p.nodes, true));
   const out = [];
   for (const p of project.parts){
-    if (RIDER_KINDS.indexOf(p.kind)<0 || partIds.indexOf(p.id)>=0 || !p.nodes.length) continue;
+    if (partIds.indexOf(p.id)>=0 || !p.nodes.length) continue;
+    // 書き込んだ寸法（📐）は、測った相手のパーツと一緒に動く。
+    // 寸法線はパーツの外に出るので「内側にあるか」では判定できない。
+    // どのパーツを測ったかを覚えてあるので、それで結び付ける。
+    if (p.kind==="mdim" && p.mhost && partIds.indexOf(p.mhost)>=0){ out.push(p); continue; }
+    if (RIDER_KINDS.indexOf(p.kind)<0) continue;
+    if (!hosts.length) continue;
     if (p.nodes.every(n => hosts.some(h => pointInPoly(n, h)))) out.push(p);
   }
   return out;
@@ -1446,6 +1453,7 @@ function selCentroid(){
 // Rotate the currently-selected points around their centroid (handles included).
 function rotateSelection(deg){
   if (!multiSel.length) return; pushUndo();
+  multiSel = withRiders(multiSel);            // 乗っている線・書き込んだ寸法も一緒に
   const c=selCentroid(), rad=deg*Math.PI/180, cos=Math.cos(rad), sin=Math.sin(rad);
   const rot=(p)=>({ x:c.x+(p.x-c.x)*cos-(p.y-c.y)*sin, y:c.y+(p.x-c.x)*sin+(p.y-c.y)*cos });
   const rotOff=(o)=> o?{ x:o.x*cos-o.y*sin, y:o.x*sin+o.y*cos }:null;
@@ -1488,6 +1496,7 @@ function wholePartsInSel(){
 }
 function flipSelection(axis){
   if (!multiSel.length) return; pushUndo();
+  multiSel = withRiders(multiSel);            // 乗っている線・書き込んだ寸法も一緒に
   const c=selCentroid();
   const fp=(p)=> axis==="h" ? { x:2*c.x-p.x, y:p.y } : { x:p.x, y:2*c.y-p.y };
   const fo=(o)=> o ? (axis==="h" ? { x:-o.x, y:o.y } : { x:o.x, y:-o.y }) : null;
@@ -1715,20 +1724,113 @@ function dimPartsIn(list){
 function shiftDimPos(list, dx, dy){
   for (const p of dimPartsIn(list)) p.mpos += (p.maxis==="h") ? dy : dx;
 }
+// 書き込んだ寸法の両端を「測った相手の輪郭の、どのあたり」で覚える。
+// 座標のまま持っていると、パーツの形を変えたときに寸法線が取り残される。
+// （アールは中心が輪郭の外にあるので、この覚え方はできない）
+function bindDimToHost(d, keepDir){
+  if (!d || d.kind!=="mdim" || d.mone || !d.mhost || d.nodes.length<2) return;
+  const host = project.parts.find(q=>q.id===d.mhost);
+  if (!host || !host.closed || host.nodes.length<3) return;
+  const a = outlineParamOf(host, d.nodes[0]);
+  const b = outlineParamOf(host, d.nodes[1]);
+  // 輪郭から離れている（宙に浮いた寸法）は結び付けない
+  if (a.d > 2 || b.d > 2) return;
+  d.mpa = { i:a.i, t:a.t };
+  d.mpb = { i:b.i, t:b.t };
+  d.mgap = (d.maxis==="h") ? d.mpos - (d.nodes[0].y+d.nodes[1].y)/2
+         : (d.maxis==="v") ? d.mpos - (d.nodes[0].x+d.nodes[1].x)/2
+         : null;
+  d.mhostN = host.nodes.length;    // 点の数。増減したら覚え直す合図にする
+  // 周長は「どちら回りに測ったか」も覚える。
+  // 書いた時の数字に近いほうの回り方が、その時たどった道すじ。
+  // 覚え直しのときは、前の回り方をそのまま引き継ぐ（角を丸めただけで裏返らないように）。
+  if (d.maxis && !keepDir){
+    const want = parseFloat(String(d.mlabel||"").replace(/[^0-9.]/g,""));
+    const fwd = outlineLenBetween(host, d.mpa, d.mpb, 1);
+    const bwd = outlineLenBetween(host, d.mpa, d.mpb, -1);
+    d.mdir = (!isFinite(want)) ? 1
+           : (Math.abs(fwd-want) <= Math.abs(bwd-want) ? 1 : -1);
+  }
+}
+// 輪郭の「どのあたり」から「どのあたり」まで、輪郭に沿った長さを測る。
+// 周長の書き込みは、形を変えたらこの長さも測り直す（数字が古いまま残らないように）。
+// dir が +1 なら番号が増える向き、-1 なら減る向きに回る。
+function outlineLenBetween(part, pa, pb, dir){
+  const closed = part.closed;
+  const segCount = closed ? part.nodes.length : part.nodes.length-1;
+  if (segCount < 1) return 0;
+  // 1つの辺の、t1〜t2 のあいだの長さ（細かく刻んで足す）
+  const partial = (i, t1, t2)=>{
+    if (t2 <= t1) return 0;
+    const steps = Math.max(4, Math.ceil((t2-t1)*24));
+    let L = 0, prev = outlinePointAt(part, i, t1);
+    for (let k=1;k<=steps;k++){
+      const q = outlinePointAt(part, i, t1 + (t2-t1)*k/steps);
+      L += Math.hypot(q.x-prev.x, q.y-prev.y); prev = q;
+    }
+    return L;
+  };
+  let total = 0;
+  if (dir >= 0){
+    if (pa.i === pb.i && pa.t <= pb.t) return partial(pa.i, pa.t, pb.t);
+    total += partial(pa.i, pa.t, 1);
+    for (let i=(pa.i+1)%segCount; i!==pb.i; i=(i+1)%segCount){
+      total += partial(i, 0, 1);
+      if (total > 1e9) break;                      // 念のための止め
+    }
+    total += partial(pb.i, 0, pb.t);
+  } else {
+    if (pa.i === pb.i && pb.t <= pa.t) return partial(pa.i, pb.t, pa.t);
+    total += partial(pa.i, 0, pa.t);
+    for (let i=(pa.i-1+segCount)%segCount; i!==pb.i; i=(i-1+segCount)%segCount){
+      total += partial(i, 0, 1);
+      if (total > 1e9) break;
+    }
+    total += partial(pb.i, pb.t, 1);
+  }
+  return total;
+}
+// 覚えた位置から、いまの輪郭に合わせて寸法線を置き直す。
+// 描くたびに呼ぶので、形を変えている最中もぴったり付いてくる。
+function syncDimsToHosts(){
+  for (const d of project.parts){
+    if (d.kind!=="mdim" || !d.mpa || !d.mpb || !d.mhost) continue;
+    const host = project.parts.find(q=>q.id===d.mhost);
+    if (!host || !host.closed || host.nodes.length<3) continue;
+    // 点が増減した（角を丸めた・点を足した等）と、覚えた辺の番号がずれる。
+    // その時は、いまの寸法線の位置から覚え直す（回り方はそのまま引き継ぐ）。
+    if (d.mhostN !== undefined && d.mhostN !== host.nodes.length){
+      bindDimToHost(d, true);
+      if (!d.mpa || !d.mpb) continue;
+    }
+    const segCount = host.nodes.length;
+    if (d.mpa.i >= segCount || d.mpb.i >= segCount) continue;   // 点が減った時は触らない
+    const pa = outlinePointAt(host, d.mpa.i, d.mpa.t);
+    const pb = outlinePointAt(host, d.mpb.i, d.mpb.t);
+    d.nodes[0].x = pa.x; d.nodes[0].y = pa.y;
+    d.nodes[1].x = pb.x; d.nodes[1].y = pb.y;
+    if (d.maxis && d.mgap !== null && d.mgap !== undefined){
+      d.mpos = (d.maxis==="h") ? (pa.y+pb.y)/2 + d.mgap : (pa.x+pb.x)/2 + d.mgap;
+    }
+    // 周長は、いまの輪郭に沿って測り直す。形が変われば数字も変わる。
+    if (d.maxis && d.mdir){
+      const L = outlineLenBetween(host, d.mpa, d.mpb, d.mdir);
+      if (isFinite(L) && L > 0) d.mlabel = fmtMM(L);
+    }
+  }
+}
 function scaleDimPos(list, anchor, sx, sy){
+  // 線を通す位置だけ合わせる。数値は syncDimsToHosts が輪郭から測り直す。
   for (const p of dimPartsIn(list)){
     if (p.maxis==="h") p.mpos = anchor.y + (p.mpos-anchor.y)*sy;
     else               p.mpos = anchor.x + (p.mpos-anchor.x)*sx;
-    // 周長は輪郭に沿った長さなので2点からは測り直せない。伸ばしたぶんだけ数字も伸ばす。
-    const f = Math.abs(p.maxis==="h" ? sx : sy);
-    const num = parseFloat(String(p.mlabel||"").replace(/[^0-9.]/g,""));
-    if (isFinite(num) && isFinite(f) && f>0) p.mlabel = fmtMM(num*f);
   }
 }
 function moveSelectionBy(dx, dy){
   if (!multiSel.length && !selTexts.length) return false;
   if (!isFinite(dx) || !isFinite(dy) || (dx===0 && dy===0)) return false;
   pushUndo();
+  multiSel = withRiders(multiSel);            // 乗っている線・書き込んだ寸法も一緒に
   captureSymPairs(multiSel);                 // 鏡の相手は動かす前に控える
   const notches = captureNotches(multiSel);  // まるごと選ばれたパーツの合印
   const holes = captureHoles(multiSel);      // 同じくパーツの穴
@@ -2170,12 +2272,11 @@ function applyScale(shift){
     nd.hIn  = o.hIn  ? { x:o.hIn.x*sx,  y:o.hIn.y*sy }  : null;
     nd.hOut = o.hOut ? { x:o.hOut.x*sx, y:o.hOut.y*sy } : null;
   }
-  // 周長の寸法線を通す位置と数値も、伸び縮みに合わせる（控えた元の値から計算する）
+  // 周長の寸法線を通す位置を、伸び縮みに合わせる（控えた元の値から計算する）。
+  // 数値のほうは syncDimsToHosts が、いまの輪郭に沿って測り直す。
   for (const o of (d.dims||[])){
     const p = project.parts.find(pp=>pp.id===o.partId); if (!p) continue;
     p.mpos = (p.maxis==="h") ? a.y + (o.mpos-a.y)*sy : a.x + (o.mpos-a.x)*sx;
-    const f = Math.abs(p.maxis==="h" ? sx : sy);
-    if (isFinite(o.num) && isFinite(f) && f>0) p.mlabel = fmtMM(o.num*f);
   }
   const fs = (Math.abs(sx)+Math.abs(sy))/2;
   for (const o of d.texts){
@@ -2570,7 +2671,29 @@ function normalizeLook(p){
 }
 function normalizeAllParts(){ if (!project.texts) project.texts=[]; if (!project.guides) project.guides=[]; for (const p of project.parts){ if (!p.notches) p.notches=[]; if (p.stitch==null) p.stitch=0; if (p.group===undefined) p.group=null; if (p.name==null) p.name=""; if (!p.color) p.color=DEFAULT_COLOR; normalizeLook(p); migratePart(p); resnapNotches(p); }
   normalizeLayers();
+  linkOrphanDims();
   for (const t of project.texts){ if (t.group===undefined) t.group=null; if (!t.font) t.font="gothic"; if (t.bold===undefined) t.bold=false; } }
+// 前に作った図面には「どのパーツを測ったか」が入っていない。
+// 寸法線の両端に一番近いパーツを探して結び付ける（そのパーツと一緒に動くように）。
+function linkOrphanDims(){
+  const solids = project.parts.filter(p=>!p.kind && p.closed && p.nodes.length>=3);
+  if (!solids.length) return;
+  for (const d of project.parts){
+    if (d.kind!=="mdim" || d.mhost || d.nodes.length<2) continue;
+    let best = null;
+    for (const s of solids){
+      const flat = flattenNodes(s.nodes, true);
+      const dd = d.nodes.reduce((m,nd)=>m + nearestOnOutline(flat, nd, true).d, 0) / d.nodes.length;
+      if (!best || dd < best.d) best = { id:s.id, d:dd };
+    }
+    // 遠すぎるものは結び付けない（別の場所に書いたメモかもしれない）
+    if (best && best.d < 60) d.mhost = best.id;
+  }
+  // 相手が決まったら、輪郭のどのあたりかも覚えさせる
+  for (const d of project.parts){
+    if (d.kind==="mdim" && d.mhost && !d.mpa) bindDimToHost(d);
+  }
+}
 function bezierAt(seg, u){
   const mu = 1-u;
   return {
@@ -3128,7 +3251,71 @@ function drawDimension(frag, part){
   const sm = worldToScreen({ x:mid.x+px*3.5, y:mid.y+py*3.5 });
   const t = mk("text", { x:sm.x, y:sm.y, class:"dimtext", fill:col, "text-anchor":"middle" });
   t.textContent = label;
+  // 他の寸法の数字と重ならない場所へずらす（読めなくなるのを防ぐ）
+  const smBase = worldToScreen(mid);
+  let sdx = sb.x-sa.x, sdy = sb.y-sa.y;
+  const slen = Math.hypot(sdx, sdy) || 1;
+  const sdir = { x:sdx/slen, y:sdy/slen };                 // 画面上での「線に沿った向き」
+  let spx = sm.x-smBase.x, spy = sm.y-smBase.y;
+  const spl = Math.hypot(spx, spy);
+  const sperp = (spl > 0.01) ? { x:spx/spl, y:spy/spl }    // 画面上での「線から離れる向き」
+                             : { x:-sdir.y, y:sdir.x };
+  const away = avoidLabelOverlap(sm, label, sdir, sperp, slen);
+  if (away){ t.setAttribute("x", away.x); t.setAttribute("y", away.y); }
   frag.appendChild(t);
+}
+// ===== 寸法の数字が重ならないようにする =====
+// 寸法線どうしが近いと、数字が重なって読めなくなる。
+// すでに置いた数字の場所を覚えておき、ぶつかるなら空いている所へ逃がす。
+// 逃がす順番は「まず自分の線に沿って横へ」「それでも駄目なら線から少し離す」。
+// 線から離す方を後にするのは、離すと どの寸法の数字か分からなくなるため。
+let dimLabelBoxes = [];
+function resetLabelBoxes(){ dimLabelBoxes = []; }
+// 数字の幅は、実際に使っている書体で測る。
+// 文字数から見積もると、MacとWindowsで書体が違うぶんだけ外れて、重なりを見落とす。
+let _labelCtx = null, _labelFont = "", _labelW = new Map();
+function labelWidth(label){
+  const key = String(label);
+  const got = _labelW.get(key);
+  if (got !== undefined) return got;
+  if (!_labelCtx) _labelCtx = document.createElement("canvas").getContext("2d");
+  if (!_labelFont){
+    const fam = getComputedStyle(svg).fontFamily || "sans-serif";
+    _labelFont = "700 12px " + fam;                // .dimtext と同じ（太字・12px）
+  }
+  _labelCtx.font = _labelFont;
+  const w = _labelCtx.measureText(key).width;
+  if (_labelW.size > 400) _labelW.clear();
+  _labelW.set(key, w);
+  return w;
+}
+function avoidLabelOverlap(sm, label, dir, perp, lineLen){
+  const w = labelWidth(label) + 5;                // 白フチのぶんを少し足す
+  const h = 12 + 5;
+  const u = dir  || { x:1, y:0 };
+  const v = perp || { x:0, y:-1 };
+  const hits = (x, y)=> dimLabelBoxes.some(b =>
+    Math.abs(x-b.x) < (w+b.w)/2 && Math.abs(y-b.y) < (h+b.h)/2);
+  let best = null;
+  if (!hits(sm.x, sm.y)){
+    best = { x:sm.x, y:sm.y };
+  } else {
+    const near = [], outside = [], off = [];
+    const reach = Math.max(0, (lineLen||0)/2 - w/2);   // 線の端からはみ出さずに動ける量
+    for (let k=1; k<=10; k++){
+      const d = (w*0.55)*k;
+      const a = { x:sm.x+u.x*d, y:sm.y+u.y*d }, b = { x:sm.x-u.x*d, y:sm.y-u.y*d };
+      // ①線に沿って左右へ（線の上に乗ったまま動くので、どの寸法か分かる）
+      // ②線からはみ出す位置（矢じりの外側。それでも線のすぐ横なので読める）
+      if (d <= reach){ near.push(a); near.push(b); } else { outside.push(a); outside.push(b); }
+    }
+    // ③どうしても空かなければ、線から少しずつ離す
+    for (let k=1; k<=8; k++) off.push({ x:sm.x+v.x*(h+2)*k, y:sm.y+v.y*(h+2)*k });
+    for (const c of near.concat(outside, off)){ if (!hits(c.x, c.y)){ best = c; break; } }
+    if (!best) best = { x:sm.x, y:sm.y };
+  }
+  dimLabelBoxes.push({ x:best.x, y:best.y, w, h });
+  return (best.x!==sm.x || best.y!==sm.y) ? best : null;
 }
 
 // ===== 計測 =====
@@ -3723,6 +3910,7 @@ function renderSnapGuides(){
 // viewOnly＝見る場所を変えただけ。図面の中身は変わっていないので、
 // 右の一覧や色パネルなど「中身に連動する表示」は作り直さない。
 function render(viewOnly){
+  syncDimsToHosts();   // 書き込んだ寸法を、いまのパーツの形に合わせる
   renderGrid();
   renderParts();
   renderTexts();       // text labels/annotations
@@ -3924,6 +4112,7 @@ function nearestNodeAt(sp, maxPx){
 function renderParts(){
   gParts.innerHTML = "";
   updateViewBox();
+  resetLabelBoxes();      // 寸法の数字の重なり判定を、描くたびにやり直す
   const showDim = document.getElementById("chk-dim").checked;
   const frag = document.createDocumentFragment();
   let pg = frag;                       // 今描いているパーツの入れ物（不透明度をまとめてかける）
@@ -5490,8 +5679,22 @@ document.getElementById("context-menu").addEventListener("focusin", (e)=>{
 document.getElementById("context-menu").addEventListener("mousedown", (e)=>{
   if (e.target.id === "cm-fop") pushUndo();
 });
+// 右クリックメニューを、画面からはみ出さない場所に置く。
+// 押した所にそのまま置くと、右端や下端で見切れてしまう。
 function placeMenu(m, x, y){
-  m.style.left = x + "px"; m.style.top = y + "px"; m.classList.add("show");
+  const pad = 6;
+  m.style.left = "0px"; m.style.top = "0px";
+  m.classList.add("show");                       // 大きさを測るため、先に出す
+  const w = m.offsetWidth, h = m.offsetHeight;
+  const host = m.offsetParent || document.body;
+  const maxW = host.clientWidth, maxH = host.clientHeight;
+  let L = x, T = y;
+  if (L + w > maxW - pad) L = x - w;              // 右がはみ出す → 押した所の左に出す
+  L = Math.max(pad, Math.min(L, maxW - w - pad));
+  if (T + h > maxH - pad) T = y - h;              // 下がはみ出す → 押した所の上に出す
+  T = Math.max(pad, Math.min(T, maxH - h - pad));
+  m.style.left = Math.round(L) + "px";
+  m.style.top  = Math.round(T) + "px";
 }
 function showGuideMenu(x, y, g){
   ctxTarget = { guide: g };
@@ -6277,6 +6480,7 @@ document.getElementById("btn-meas-label").addEventListener("click", ()=>{
     // アール：中心から円弧へ引いた線に R○○ と入れる
     const p = { id, kind:"mdim", meas:true, color:col, closed:false, name:"", qty:1, fabric:"",
       seam:0, stitch:0, group:null, notches:[], mlabel:"R"+fmtMM(measure.value).replace("mm",""), moff:0, mone:true,
+      mhost: measure.partId || null,          // どのパーツを測ったか（一緒に動かすため）
       nodes:[ {x:measure.c.x, y:measure.c.y, hIn:null, hOut:null},
               {x:measure.mid.x, y:measure.mid.y, hIn:null, hOut:null} ] };
     project.parts.push(p);
@@ -6284,8 +6488,10 @@ document.getElementById("btn-meas-label").addEventListener("click", ()=>{
     // 直線距離：2点をそのまま結ぶ寸法線（引き出し線なし）
     const p = { id, kind:"mdim", meas:true, color:col, closed:false, name:"", qty:1, fabric:"",
       seam:0, stitch:0, group:null, notches:[], mlabel:fmtMM(measure.value), moff:0,
+      mhost: measure.partId || null,          // どのパーツを測ったか（一緒に動かすため）
       nodes:[ {x:measure.a.x, y:measure.a.y, hIn:null, hOut:null},
               {x:measure.b.x, y:measure.b.y, hIn:null, hOut:null} ] };
+    bindDimToHost(p);
     project.parts.push(p);
   } else {
     // 周長：測った両端に引き出し線を立て、その先に寸法線を渡す
@@ -6309,7 +6515,9 @@ document.getElementById("btn-meas-label").addEventListener("click", ()=>{
     const p = { id, kind:"mdim", meas:true, color:col, closed:false, name:"", qty:1, fabric:"",
       seam:0, stitch:0, group:null, notches:[], mlabel:fmtMM(measure.value),
       maxis:axis, mpos:pos,
+      mhost: measure.partId || null,          // どのパーツを測ったか（一緒に動かすため）
       nodes:[ {x:A.x, y:A.y, hIn:null, hOut:null}, {x:B.x, y:B.y, hIn:null, hOut:null} ] };
+    bindDimToHost(p);
     project.parts.push(p);
   }
   measure.textId = id;
