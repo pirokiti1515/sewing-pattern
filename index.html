@@ -236,6 +236,10 @@
     box-shadow: 0 6px 20px rgba(0,0,0,.35); z-index: 40; pointer-events: none;
     opacity: 0; transition: opacity .15s, transform .15s; white-space: nowrap; }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  /* ナイフの切り口の下書き */
+  .knife-line { stroke: #dc2626; stroke-width: 2; stroke-dasharray: 7 4; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .knife-pt { fill: #fff; stroke: #dc2626; stroke-width: 2.5; vector-effect: non-scaling-stroke; pointer-events: none; }
+  svg.mode-knife { cursor: crosshair; }
   .snap-dot { fill: #fff; stroke: #2563eb; stroke-width: 1.2; vector-effect: non-scaling-stroke; pointer-events: none; }
   .snap-dot.on { fill: #f59e0b; stroke: #b45309; stroke-width: 2; }
   .selpt { fill: #fff; stroke: #2563eb; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
@@ -742,6 +746,18 @@
       </ul>
       <p>グループ化したものは 🔗 の行にまとまり、名前を付けたり、まとめて表示・非表示にしたり、⛓ で解除したりできます。</p>
 
+      <h3>🔪 ナイフ（2点を結んで切り分ける）</h3>
+      <p>左のツールバーの <b>🔪ナイフ</b>（ショートカット K）で、
+      <b>輪郭の2か所をクリック</b>すると、その間をまっすぐ切って2枚に分けます。
+      切り抜き（⊖）とちがい、刃になるパーツを用意する必要がありません。</p>
+      <ul>
+        <li>ポイントに近づくと<b>吸着</b>します（点と点を結んで切りたいとき）</li>
+        <li>1点目を決めると、切り口が<b>赤い破線</b>で出ます</li>
+        <li><b>Esc</b> で切るのをやめられます</li>
+        <li>曲線はそのままの形で分かれます。合印は近いほうの切れ端に付いていきます</li>
+        <li>名前は「○○①」「○○②」になります。⌘Z で元の1枚に戻せます</li>
+      </ul>
+
       <h3>⊖ 切り抜く（パーツの足し引き）</h3>
       <p>パーツを<b>2枚選ぶ</b>と、上のバーに ⊖ ⊗ ⊕ が出ます（右クリックからも選べます）。</p>
       <p><b>2枚の選び方</b>：1枚をクリック → もう1枚を <b>⌘+クリック</b>（Windowsは Ctrl+クリック）。
@@ -829,7 +845,7 @@
 
       <h3>ショートカット</h3>
       <ul>
-        <li>V 選択 / P ペン / R 四角 / O 丸 / T 文字 / S ステッチ / F ファスナー / D 寸法線 / A 矢印 / N 合印 / C 接円弧</li>
+        <li>V 選択 / P ペン / R 四角 / O 丸 / T 文字 / S ステッチ / F ファスナー / D 寸法線 / A 矢印 / N 合印 / C 接円弧 / K ナイフ</li>
         <li>⌘Z 取り消し、⌘⇧Z やり直し</li>
         <li>⌘A 全部選ぶ</li>
         <li>⌘C コピー、⌘V 貼り付け、⌘X 切り取り</li>
@@ -977,6 +993,7 @@
       <button class="tool" data-tool="arrow" id="tool-arrow" title="矢印：地の目・引き出し線 (A)"><span class="ic">↗</span><span class="tl">矢印</span></button>
       <button class="tool" data-tool="notch" id="tool-notch" title="合印 (N)"><span class="ic">⊹</span><span class="tl">合印</span></button>
       <button class="tool" data-tool="fillet" id="tool-fillet" title="接円弧：角を丸める (C)"><span class="ic">⌒</span><span class="tl">接円弧</span></button>
+      <button class="tool" data-tool="knife" id="tool-knife" title="ナイフ：輪郭の2点を結んで、パーツを切り分ける (K)"><span class="ic">🔪</span><span class="tl">ナイフ</span></button>
     </div>
     <div id="canvas-wrap">
       <svg id="svg" xmlns="http://www.w3.org/2000/svg">
@@ -1254,6 +1271,8 @@ let selEdge = null;         // 選んでいる辺 {partId, i, hole} — 角度�
 let edgePivotEnd = false;   // true なら終点を固定して始点を動かす
 let notchSnap = null;       // 合印ツールで、いま吸着しようとしているポイント {part, idx, node}
 const NOTCH_SNAP_PX = 14;   // この距離（画面上のドット）まで近づいたらポイントに吸着する
+let knifeA = null;          // ナイフの1点目 {part, i, t, pt, onNode}
+let knifeHover = null;      // ナイフでいま狙っている場所（同じ形）
 let selMode = "points";     // "part" = whole part picked, "points" = individual points picked
 
 // The middle handle of an edge: grab it to move that whole edge.
@@ -1899,6 +1918,111 @@ function booleanSelection(op){
       : holes ? `穴を${holes}個あけました${swapNote}`
       : pieces>1 ? `切り抜いた結果、${pieces}枚に分かれました`
       : `切り抜きました${swapNote}`);
+}
+
+// ===== ナイフ：輪郭の2点を結ぶ線でパーツを切り分ける =====
+// 切り抜き（⊖）とちがい、刃になるパーツが要らない。
+// 輪郭の点を2つ指すだけで、その間をまっすぐ切って2枚にする。
+// 曲線は「ド・カステリョ分割」で割るので、形はまったく変わらない。
+
+// 画面の位置から、切る場所（どのパーツの、どの辺の、どのあたり）を探す。
+// 近くに点があれば、その点にぴたっと吸着する（点と点を結んで切りたいため）。
+function knifeSpotAt(sp, wp){
+  const hit = nearestNodeAt(sp, NOTCH_SNAP_PX);
+  if (hit && hit.part.closed && hit.part.nodes.length >= 3){
+    return { part: hit.part, i: hit.idx, t: 0, onNode: true,
+             pt: { x: hit.node.x, y: hit.node.y } };
+  }
+  const spot = findOutlineSpotWorld(wp);
+  if (!spot || !spot.part.closed || spot.part.nodes.length < 3) return null;
+  return { part: spot.part, i: spot.i, t: spot.t, onNode: false,
+           pt: outlinePointAt(spot.part, spot.i, spot.t) };
+}
+// 2か所に点を足して、その番号を返す。すでに点の上なら足さずにその番号を使う。
+function knifeInsertCuts(part, a, b){
+  // 後ろ側から先に入れる。先に前を入れると、後ろの番号がずれてしまう。
+  const later  = (a.i > b.i || (a.i===b.i && a.t > b.t)) ? a : b;
+  const earlier = (later === a) ? b : a;
+  let nodeLater = null, nodeEarlier = null;
+  if (later.onNode){ nodeLater = part.nodes[later.i]; }
+  else {
+    if (!insertNodeOnSegment(part, later.i, later.t)) return null;
+    nodeLater = part.nodes[later.i + 1];
+  }
+  if (earlier.onNode){ nodeEarlier = part.nodes[earlier.i]; }
+  else {
+    let ei = earlier.i, et = earlier.t;
+    // 同じ辺に2か所ある時は、後ろを入れたぶん辺が短くなっているので割合を直す
+    if (!later.onNode && earlier.i === later.i){
+      if (later.t <= 1e-9) return null;
+      et = earlier.t / later.t;
+    }
+    if (!insertNodeOnSegment(part, ei, et)) return null;
+    nodeEarlier = part.nodes[ei + 1];
+  }
+  const ia = part.nodes.indexOf(nodeEarlier), ib = part.nodes.indexOf(nodeLater);
+  if (ia < 0 || ib < 0 || ia === ib) return null;
+  return { ia, ib };
+}
+// 実際に切る
+function knifeCut(part, a, b){
+  if (!part.closed || part.nodes.length < 3) return "閉じたパーツだけ切れます";
+  const backup = JSON.parse(JSON.stringify(part.nodes));
+  const cut = knifeInsertCuts(part, a, b);
+  if (!cut){ part.nodes = backup; return "この2点では切れません"; }
+  const n = part.nodes.length;
+  const { ia, ib } = cut;
+  // ia → ib と、ib → ia（ぐるっと回る）の2つに分ける
+  const run = (from, to)=>{
+    const list = [];
+    for (let k=from;; k=(k+1)%n){ list.push(part.nodes[k]); if (k===to) break; }
+    return list.map(nd=>({ x:nd.x, y:nd.y,
+      hIn: nd.hIn?{...nd.hIn}:null, hOut: nd.hOut?{...nd.hOut}:null }));
+  };
+  const p1 = run(ia, ib), p2 = run(ib, ia);
+  // 点が2つでも、その間が曲線なら「かまぼこ型」として成り立つ。
+  // 直線どうしだと面積ゼロになるので、それだけ断る。
+  const ok = (list)=> list.length >= 3
+    || (list.length === 2 && (list[0].hOut || list[1].hIn));
+  if (!ok(p1) || !ok(p2)){ part.nodes = backup; return "切ると形にならない場所です"; }
+  // 切り口はまっすぐにする。腕を残すと、そこだけ曲がってしまう。
+  p1[0].hIn = null; p1[p1.length-1].hOut = null;
+  p2[0].hIn = null; p2[p2.length-1].hOut = null;
+
+  pushUndo();
+  const at = project.parts.indexOf(part);
+  const mkPiece = (nodes, suffix)=>{
+    const c = JSON.parse(JSON.stringify(part));
+    c.id = "p"+(idCounter++);
+    c.nodes = nodes;
+    c.notches = [];
+    c.holes = [];
+    c.name = part.name ? part.name + suffix : "";
+    delete c.symAxis; delete c.symPair;        // 切ったら左右対称ではなくなる
+    return c;
+  };
+  const A = mkPiece(p1, "①"), B = mkPiece(p2, "②");
+  // 合印は、近いほうの切れ端に付け替える
+  for (const nt of (part.notches||[])){
+    const dA = nearestOnOutline(flattenNodes(A.nodes, true), nt, true).d;
+    const dB = nearestOnOutline(flattenNodes(B.nodes, true), nt, true).d;
+    (dA <= dB ? A : B).notches.push({ x:nt.x, y:nt.y });
+  }
+  // 穴も、入っているほうへ
+  for (const h of (part.holes||[])){
+    if (!h || h.length < 3) continue;
+    const inA = pointInRing(h[0], flattenNodes(A.nodes, true));
+    (inA ? A : B).holes.push(h.map(nd=>({ x:nd.x, y:nd.y,
+      hIn: nd.hIn?{...nd.hIn}:null, hOut: nd.hOut?{...nd.hOut}:null })));
+  }
+  if (!A.holes.length) delete A.holes;
+  if (!B.holes.length) delete B.holes;
+  resnapNotches(A); resnapNotches(B);
+  project.parts.splice(at, 1, A, B);
+  selectedPartId = A.id;
+  multiSel = []; selVertex = null; selEdge = null;
+  saveLocal(); render();
+  return null;                                  // 成功
 }
 
 function groupSelection(){
@@ -3356,6 +3480,7 @@ const MODE_INFO = {
   dim:     { icon:"📏", name:"寸法線モード" },
   select:  { icon:"⬚",  name:"選択・編集モード" },
   notch:   { icon:"⊹",  name:"合印モード" },
+  knife:   { icon:"🔪", name:"ナイフモード" },
   "pt-corner": { icon:"◆", name:"角ポイントを足す" },
   "pt-smooth": { icon:"◗", name:"丸ポイントを足す" },
   "pt-mid":    { icon:"◇", name:"中間ポイント" },
@@ -3987,6 +4112,32 @@ function renderHandles(){
     gHandles.appendChild(frag);
     return;
   }
+  // ナイフ：吸着できるポイントと、切り口の下書きを見せる
+  if (tool === "knife"){
+    for (const part of drawableParts()){
+      if (!part.closed || part.nodes.length < 3) continue;
+      part.nodes.forEach((n,i)=>{
+        const s = worldToScreen(n);
+        const on = knifeHover && knifeHover.onNode && knifeHover.part.id===part.id && knifeHover.i===i;
+        frag.appendChild(mk("circle", { cx:s.x, cy:s.y, r: on?6:3.5, class: "snap-dot"+(on?" on":"") }));
+      });
+    }
+    if (knifeA){
+      const a = worldToScreen(knifeA.pt);
+      frag.appendChild(mk("circle", { cx:a.x, cy:a.y, r:6, class:"knife-pt" }));
+      // 2点目の見当が付いていれば、切り口の線を引いて見せる
+      if (knifeHover && knifeHover.part.id===knifeA.part.id){
+        const b = worldToScreen(knifeHover.pt);
+        frag.appendChild(mk("line", { x1:a.x, y1:a.y, x2:b.x, y2:b.y, class:"knife-line" }));
+        frag.appendChild(mk("circle", { cx:b.x, cy:b.y, r:6, class:"knife-pt" }));
+      }
+    } else if (knifeHover){
+      const b = worldToScreen(knifeHover.pt);
+      frag.appendChild(mk("circle", { cx:b.x, cy:b.y, r:5, class:"knife-pt" }));
+    }
+    gHandles.appendChild(frag);
+    return;
+  }
   if (tool !== "select" || !selectedPartId) return;
   const part = project.parts.find(p=>p.id===selectedPartId);
   if (!part) return;
@@ -4229,6 +4380,12 @@ function updateHint(){
   } else if (tool==="notch"){
     msg += notchSnap ? " ・ このポイントに合わせて合印を入れます（クリック）"
                      : " ・ 輪郭付近をクリックで合印を追加（ポイントに近づくと吸着）/ 右クリックで削除";
+  } else if (tool==="knife"){
+    msg += !knifeA
+      ? " ・ 切りはじめの場所を輪郭の上でクリック（ポイントに近づくと吸着）"
+      : (knifeHover && knifeHover.part.id===knifeA.part.id
+          ? " ・ ここまでまっすぐ切ります（クリック）／ Escでやめる"
+          : " ・ 同じパーツの輪郭の上で、切り終わりをクリック／ Escでやめる");
   } else if (tool==="len"){
     msg += " ・ ①始点 → ②通り道 → ③終点 の順にクリック（曲線に沿って測ります）";
   } else if (tool==="dist"){
@@ -4490,6 +4647,7 @@ function setTool(t){
   if (t!=="pt-xy"){ xyBase = null; xyDir = null; }
   if (t!=="select") selEdge = null;
   if (t!=="notch") notchSnap = null;
+  if (t!=="knife"){ knifeA = null; knifeHover = null; }   // ナイフをやめたら切りかけを捨てる
   if (t!=="select" && t!=="text") selTexts = [];
   document.querySelectorAll("button.tool").forEach(b=>b.classList.toggle("active", b.dataset.tool===t));
   // the 図形 (shape) button stands in for rect/ellipse
@@ -4561,6 +4719,30 @@ svg.addEventListener("mousedown", (e)=>{
     // Windowsのブラウザは中ボタンで「オートスクロール」の丸印を出してしまうので止める
     e.preventDefault();
     panning = { x: sp.x, y: sp.y, tx: view.tx, ty: view.ty };
+    return;
+  }
+  // ナイフ：輪郭の2点をクリックして、その間をまっすぐ切る
+  if (tool==="knife"){
+    const spot = knifeSpotAt(sp, wp);
+    if (!spot){ toast("パーツの輪郭の上をクリックしてください"); return; }
+    if (!knifeA){
+      knifeA = spot;
+      selectedPartId = spot.part.id;
+      render();
+      return;
+    }
+    if (spot.part.id !== knifeA.part.id){
+      toast("同じパーツの輪郭の上を指してください");
+      return;
+    }
+    // 同じ場所を2回押した時は切らない（1点目を選び直したのだと見なす）
+    if (Math.hypot(spot.pt.x-knifeA.pt.x, spot.pt.y-knifeA.pt.y) < 0.5){
+      knifeA = spot; render(); return;
+    }
+    const err = knifeCut(spot.part, knifeA, spot);
+    knifeA = null; knifeHover = null;
+    if (err) toast(err); else toast("2枚に切り分けました");
+    render();
     return;
   }
   // Notch tool: click near an outline to drop a match mark on the nearest part
@@ -5116,6 +5298,13 @@ svg.addEventListener("mousemove", (e)=>{
     if (key !== prev){ notchSnap = hit; renderThrottled(); }
     updateHint();
   }
+  else if (tool==="knife"){
+    // 狙っている場所をたどる（1点目を決めた後は、切り口の下書きも出す）
+    // ここでの世界座標は mouseWorld（この関数には wp という変数は無い）
+    knifeHover = knifeSpotAt(sp, mouseWorld);
+    renderThrottled();
+    updateHint();
+  }
   else {
     // highlight the edge under the cursor so it's obvious you can grab it
     if (tool==="select" && selectedPartId && !selMove && !handleDrag){
@@ -5613,7 +5802,7 @@ window.addEventListener("keydown", (e)=>{
     if (copySelection()){ deleteSelection(); } return; }
   // tool keyboard shortcuts (Affinity-style)
   if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length===1){
-    const map = { v:"select", p:"draw", t:"text", r:"rect", o:"ellipse", e:"select", n:"notch", s:"stitch", a:"arrow", d:"dim", f:"zip", c:"fillet" };
+    const map = { v:"select", p:"draw", t:"text", r:"rect", o:"ellipse", e:"select", n:"notch", s:"stitch", a:"arrow", d:"dim", f:"zip", c:"fillet", k:"knife" };
     const k = e.key.toLowerCase();
     if (map[k]){ e.preventDefault(); setTool(map[k]); return; }
   }
@@ -5625,6 +5814,10 @@ window.addEventListener("keydown", (e)=>{
     project.guides = project.guides.filter(g=>g.id!==selGuide);
     if (xyBase && xyBase.guideId===selGuide) xyBase = null;
     selGuide = null; saveLocal(); render(); return;
+  }
+  // ナイフの1点目を決めた後の Esc は、切りかけをやめるだけ（選択は触らない）
+  if (e.key==="Escape" && tool==="knife" && knifeA){
+    e.preventDefault(); knifeA = null; render(); toast("切るのをやめました"); return;
   }
   if (e.key==="Escape" && !drawing){ selectedPartId=null; multiSel=[]; selVertex=null; marquee=null; selTexts=[]; selGuide=null; render(); }
   if (drawing){
