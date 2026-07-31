@@ -2369,17 +2369,24 @@ function updateUndoButtons(){
 }
 
 // Find the vertex nearest to a screen point (across all parts), within a pixel threshold.
-function findVertexAt(sp){
+// prefer（{partId, hole}）を渡すと、その輪の点を先に探す。
+// 中間ポイントの2点目で使う。布の点を選んだ直後に、少し内側のステッチ線の点を
+// 拾ってしまい、黙って選び直しになって、続けて押すとステッチ線側に点ができていた。
+function findVertexAt(sp, prefer){
   let best = { d: Infinity, part: null, idx: -1, hole: undefined };
+  let pref = { d: Infinity, part: null, idx: -1, hole: undefined };
   for (const part of project.parts){
     eachRing(part, (ring, hole)=>{
+      const same = prefer && part.id===prefer.partId && hole===prefer.hole;
       for (let i=0;i<ring.length;i++){
         const s = worldToScreen(ring[i]);
         const d = Math.hypot(sp.x - s.x, sp.y - s.y);
         if (d < best.d) best = { d, part, idx: i, hole };
+        if (same && d < pref.d) pref = { d, part, idx: i, hole };
       }
     });
   }
+  if (pref.d < 12) return pref;
   return best.d < 12 ? best : null;
 }
 // Find a bézier handle endpoint of the selected part near a screen point.
@@ -3510,22 +3517,26 @@ function findOutlineCrossing(base, ux, uy, d, preferPartId){
 }
 // 辺のどこを押したか（パーツ・辺の番号・辺の中での位置0〜1）を返す
 function findEdgeSpot(sp){
-  let best = { d: Infinity, part: null, i: -1, t: 0 };
+  let best = { d: Infinity, part: null, i: -1, t: 0, hole: undefined };
   for (const part of project.parts){
     if (part.kind || part.nodes.length < 2) continue;      // 寸法線などは対象外
-    const steps = 24;
-    const fi = flattenNodesIndexed(part.nodes, part.closed, steps);
-    const pts = fi.pts;
-    fi.range.forEach((rg, i)=>{
-      const end = (rg.end===0 && part.closed) ? pts.length : rg.end;
-      const count = end - rg.start;
-      for (let k=rg.start; k<end; k++){
-        const a = worldToScreen(pts[k]), b = worldToScreen(pts[(k+1)%pts.length]);
-        const dx=b.x-a.x, dy=b.y-a.y, L2=dx*dx+dy*dy||1;
-        let u=((sp.x-a.x)*dx+(sp.y-a.y)*dy)/L2; u=Math.max(0,Math.min(1,u));
-        const d=Math.hypot(sp.x-(a.x+dx*u), sp.y-(a.y+dy*u));
-        if (d<best.d) best = { d, part, i, t: (k-rg.start+u)/count };
-      }
+    eachRing(part, (ring, hole)=>{                         // 外枠と、穴のふちの両方
+      if (ring.length < 2) return;
+      const closed = (hole===undefined) ? part.closed : true;
+      const steps = 24;
+      const fi = flattenNodesIndexed(ring, closed, steps);
+      const pts = fi.pts;
+      fi.range.forEach((rg, i)=>{
+        const end = (rg.end===0 && closed) ? pts.length : rg.end;
+        const count = end - rg.start;
+        for (let k=rg.start; k<end; k++){
+          const a = worldToScreen(pts[k]), b = worldToScreen(pts[(k+1)%pts.length]);
+          const dx=b.x-a.x, dy=b.y-a.y, L2=dx*dx+dy*dy||1;
+          let u=((sp.x-a.x)*dx+(sp.y-a.y)*dy)/L2; u=Math.max(0,Math.min(1,u));
+          const d=Math.hypot(sp.x-(a.x+dx*u), sp.y-(a.y+dy*u));
+          if (d<best.d) best = { d, part, i, t: (k-rg.start+u)/count, hole };
+        }
+      });
     });
   }
   return best.d < 14 ? best : null;
@@ -3552,13 +3563,18 @@ function fmtMM(v){ return (v>=100 ? Math.round(v) : v.toFixed(1)) + "mm"; }
 
 // 中間ポイント：2点の間に、形をまったく変えずに点を足す。
 // 曲線は「ド・カステリョ分割」で2本に割る。割った2本を繋ぐと元の曲線と完全に一致する。
-function insertMidNode(part, i){ return insertNodeOnSegment(part, i, 0.5); }
+function insertMidNode(part, i, hole){ return insertNodeOnSegment(part, i, 0.5, hole); }
 // 辺の途中（0〜1の位置）に、形を変えずに点を足す
-function insertNodeOnSegment(part, i, t){
-  const nodes = part.nodes, n = nodes.length;
+// hole を渡すと、外枠ではなく その穴のふちに足す（渡さないと外枠の同じ番号の辺に
+// 足してしまい、押した所と全然違う場所に点ができる）
+function insertNodeOnSegment(part, i, t, hole){
+  const nodes = ringOfPart(part, hole);
+  if (!nodes) return false;
+  const closed = (hole===undefined || hole===null) ? part.closed : true;
+  const n = nodes.length;
   const j = (i+1) % n;
-  if (j===0 && !part.closed) return false;          // 開いた線の終端の先は無い
-  const sc = segControls(nodes, i, part.closed);
+  if (j===0 && !closed) return false;               // 開いた線の終端の先は無い
+  const sc = segControls(nodes, i, closed);
   const A = nodes[i], B = nodes[j];
   if (sc.straight){                                  // 直線はその位置に足すだけ
     nodes.splice(i+1, 0, { x:A.x+(B.x-A.x)*t, y:A.y+(B.y-A.y)*t, hIn:null, hOut:null });
@@ -3577,23 +3593,33 @@ function insertNodeOnSegment(part, i, t){
 }
 // 選んである点のうち、隣り合う組の間に中間ポイントを入れる
 function insertMidForSelection(){
-  const byPart = {};
-  for (const m of multiSel) (byPart[m.partId] = byPart[m.partId] || []).push(m.idx);
+  // 「どのパーツの、どの輪（外枠か、何番目の穴か）」ごとにまとめる。
+  // 点の番号は輪ごとに振られているので、混ぜると別の輪に点ができてしまう。
+  const groups = {};
+  for (const m of multiSel){
+    const key = m.partId + "|" + (isHoleSel(m) ? m.hole : "-");
+    (groups[key] = groups[key] || { partId:m.partId, hole:(isHoleSel(m)?m.hole:undefined), idx:[] })
+      .idx.push(m.idx);
+  }
   let added = 0;
-  for (const pid in byPart){
-    const p = project.parts.find(x=>x.id===pid);
+  for (const key in groups){
+    const g = groups[key];
+    const p = project.parts.find(x=>x.id===g.partId);
     if (!p) continue;
-    const n = p.nodes.length;
-    const set = new Set(byPart[pid]);
+    const ring = ringOfPart(p, g.hole);
+    if (!ring) continue;
+    const closed = (g.hole===undefined) ? p.closed : true;
+    const n = ring.length;
+    const set = new Set(g.idx);
     const pairs = [];
-    for (const i of byPart[pid]){
+    for (const i of g.idx){
       const j = (i+1) % n;
       if (!set.has(j)) continue;
-      if (j===0 && !p.closed) continue;
+      if (j===0 && !closed) continue;
       pairs.push(i);
     }
     // 番号の大きい方から入れる（前に入れると後ろの番号がずれるため）
-    pairs.sort((a,b)=>b-a).forEach(i=>{ if (insertMidNode(p, i)) added++; });
+    pairs.sort((a,b)=>b-a).forEach(i=>{ if (insertMidNode(p, i, g.hole)) added++; });
   }
   return added;
 }
@@ -5231,26 +5257,35 @@ svg.addEventListener("mousedown", (e)=>{
   }
   // ポイントツール
   if (tool==="pt-corner" || tool==="pt-smooth" || tool==="pt-mid" || tool==="pt-toggle"){
-    const v = findVertexAt(sp);
+    // 中間ポイントの2点目は、1点目と同じ輪から探す（重なった線に乗り換わらないように）
+    const prefer = (tool==="pt-mid" && multiSel.length)
+      ? { partId: multiSel[0].partId, hole: multiSel[0].hole } : null;
+    const v = findVertexAt(sp, prefer);
     // 角／丸を「足す」：辺の押した場所に、形を変えずに点を足す
     if ((tool==="pt-corner" || tool==="pt-smooth") && !v){
       const eg = findEdgeSpot(sp);
       if (eg){
         pushUndo();
-        if (insertNodeOnSegment(eg.part, eg.i, eg.t)){
+        if (insertNodeOnSegment(eg.part, eg.i, eg.t, eg.hole)){
           const idx = eg.i + 1;
-          const nd = eg.part.nodes[idx];
+          const ring = ringOfPart(eg.part, eg.hole);
+          const closed = (eg.hole===undefined) ? eg.part.closed : true;
+          const nd = ring[idx];
           if (tool==="pt-corner"){ nd.hIn = null; nd.hOut = null; }   // 角にする
           else if (!nd.hIn && !nd.hOut){
             // 直線の途中に足した時は腕が付かないので、辺に沿った腕を付けて丸にする
             // （辺と同じ向きなので形は変わらない）
-            const t = autoHandle(eg.part.nodes, idx, eg.part.closed);
+            const t = autoHandle(ring, idx, closed);
             nd.hOut = { x:t.x, y:t.y }; nd.hIn = { x:-t.x, y:-t.y };
           }
-          const side = (eg.part.symAxis!==undefined)
-            ? (nd.x < eg.part.symAxis ? "left" : "right") : null;
-          rebuildSymmetry(eg.part, side);                             // 反対側にも同じ点を
-          selectedPartId = eg.part.id; selVertex = { partId:eg.part.id, idx };
+          if (eg.hole===undefined){                                   // 左右対称は外枠だけの仕組み
+            const side = (eg.part.symAxis!==undefined)
+              ? (nd.x < eg.part.symAxis ? "left" : "right") : null;
+            rebuildSymmetry(eg.part, side);                           // 反対側にも同じ点を
+          }
+          selectedPartId = eg.part.id;
+          selVertex = (eg.hole===undefined) ? { partId:eg.part.id, idx }
+                                            : { partId:eg.part.id, idx, hole:eg.hole };
           saveLocal();
         }
         render(); return;
@@ -5258,38 +5293,45 @@ svg.addEventListener("mousedown", (e)=>{
       multiSel=[]; selectedPartId=null; selVertex=null; render(); return;
     }
     if (v){
+      // 押した点がどの輪のものかを、必ず持ち回る。落とすと外枠の同じ番号の点をいじって
+      // しまい、押した所と違う場所が変わる。
+      const vKey = (v.hole===undefined) ? { partId:v.part.id, idx:v.idx }
+                                        : { partId:v.part.id, idx:v.idx, hole:v.hole };
+      const vRing = ringOfPart(v.part, v.hole) || v.part.nodes;
+      const vClosed = (v.hole===undefined) ? v.part.closed : true;
       if (tool==="pt-corner" || tool==="pt-smooth"){
         // 点の上を押したときは、その点をその形に変える（足す場所が無いため）
         pushUndo();
-        const nd = v.part.nodes[v.idx];
+        const nd = vRing[v.idx];
         if (tool==="pt-corner"){ nd.hIn = null; nd.hOut = null; }
-        else { const t = autoHandle(v.part.nodes, v.idx, v.part.closed);
+        else { const t = autoHandle(vRing, v.idx, vClosed);
                nd.hOut = { x:t.x, y:t.y }; nd.hIn = { x:-t.x, y:-t.y }; }
-        applyMirrorToNodes([{ partId:v.part.id, idx:v.idx }]);   // 反対側も同じ形に
-        selectedPartId = v.part.id; selVertex = { partId:v.part.id, idx:v.idx };
+        applyMirrorToNodes([vKey]);                        // 反対側も同じ形に（穴は対象外）
+        selectedPartId = v.part.id; selVertex = vKey;
         saveLocal(); render(); return;
       }
       if (tool==="pt-toggle"){
         // 角 ↔ 丸 を切り替える
         pushUndo();
-        toggleNodeSmooth(v.part.nodes, v.idx, v.part.closed);
-        applyMirrorToNodes([{ partId:v.part.id, idx:v.idx }]);   // 反対側も同じ形に
-        selectedPartId = v.part.id; selVertex = { partId:v.part.id, idx:v.idx };
+        toggleNodeSmooth(vRing, v.idx, vClosed);
+        applyMirrorToNodes([vKey]);                        // 反対側も同じ形に（穴は対象外）
+        selectedPartId = v.part.id; selVertex = vKey;
         saveLocal(); render(); return;
       }
       if (tool==="pt-mid"){
         // 2点を選ぶ → その間に足す。Shift不要で、続けてクリックしていける
-        const at = multiSel.findIndex(m=>m.partId===v.part.id && m.idx===v.idx);
+        const at = multiSel.findIndex(m=>m.partId===v.part.id && m.idx===v.idx && m.hole===v.hole);
         if (at>=0) multiSel.splice(at,1);
         else {
           if (multiSel.length && multiSel[0].partId!==v.part.id) multiSel = [];   // 別パーツなら選び直し
-          multiSel.push({ partId:v.part.id, idx:v.idx });
+          multiSel.push(vKey);
         }
         selectedPartId = v.part.id; selMode = "points";
         if (multiSel.length >= 2){
           pushUndo();
           const added = insertMidForSelection();
-          for (const pid of new Set(multiSel.map(m=>m.partId))){
+          // 左右対称の作り直しは外枠だけ（穴には対称の相手がいない）
+          for (const pid of new Set(multiSel.filter(m=>!isHoleSel(m)).map(m=>m.partId))){
             rebuildSymmetry(project.parts.find(q=>q.id===pid));
           }
           multiSel = []; selVertex = null;                 // 番号がずれるので選び直し
