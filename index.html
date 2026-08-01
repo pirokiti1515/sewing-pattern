@@ -1206,6 +1206,38 @@ function outlinePointAt(part, i, t){
   if (sc.straight) return { x: sc.A.x + (sc.B.x-sc.A.x)*t, y: sc.A.y + (sc.B.y-sc.A.y)*t };
   return bezierAt(sc, t);
 }
+// ===== 部分ステッチ（選んだ辺だけの点線）の付け直し =====
+// 選んだ辺は「何番目の辺か」で覚えている。点の数が変わると番号がずれ、
+// 選んでいない辺に点線が移ってしまう（合体・ナイフ・接円弧・点の追加削除で起きる）。
+// 形を変える前に辺の通り道を控え、変えた後に同じ場所の辺へ付け直す。
+function captureStitchEdges(part){
+  if (!part || !Array.isArray(part.stitchEdges) || !part.stitchEdges.length) return null;
+  const n = part.nodes.length, segCount = part.closed ? n : n-1;
+  const segs = [];
+  for (const i of part.stitchEdges){
+    if (i < 0 || i >= segCount) continue;
+    const pts = [];
+    for (let k=0;k<=8;k++) pts.push(outlinePointAt(part, i, k/8));
+    segs.push(pts);
+  }
+  return segs.length ? segs : null;
+}
+function restoreStitchEdges(part, segs, tol){
+  if (!part || !segs) return;
+  tol = tol || 1;
+  const n = part.nodes.length, segCount = part.closed ? n : n-1;
+  const pick = [];
+  for (let i=0;i<segCount;i++){
+    const m = outlinePointAt(part, i, 0.5);
+    let d = Infinity;
+    for (const s of segs) for (let k=0;k<s.length-1;k++){
+      const t = distPtSeg(m, s[k], s[k+1]); if (t < d) d = t;
+    }
+    if (d <= tol) pick.push(i);
+  }
+  part.stitchEdges = pick;
+  if (!pick.length) part.stitch = 0;      // 元の辺が残っていない＝ステッチ無し
+}
 // 動かす前に控える。list に入っているパーツの合印だけが対象。
 function captureNotches(list){
   const ids = new Set((list||[]).map(m=>m.partId));
@@ -1238,7 +1270,8 @@ function makeSelMove(wp, list, textIds){
   const ids = (textIds !== undefined) ? textIds : [];
   return { startW: wp,
     // hole（どの穴の点か）を必ず持ち回ること。落とすと外枠の同じ番号の点が動いてしまう。
-    orig: list.map(m=>{ const nd=nodeOf(m); return { partId:m.partId, idx:m.idx, hole:m.hole, x:nd.x, y:nd.y }; }),
+    // 消えたパーツ／減った番号が選択に残っていることがあるので、実在する点だけ拾う
+    orig: list.map(m=>{ const nd=nodeOf(m); return nd ? { partId:m.partId, idx:m.idx, hole:m.hole, x:nd.x, y:nd.y } : null; }).filter(Boolean),
     origTexts: ids.map(id=>{ const t=project.texts.find(x=>x.id===id); return t?{id, x:t.x, y:t.y}:null; }).filter(Boolean),
     origNotches: captureNotches(list),
     origHoles: captureHoles(list),
@@ -1584,7 +1617,9 @@ function deleteSelection(){
     const part=project.parts.find(p=>p.id===pid); if(!part) continue;
     if (byPart[pid].length >= part.nodes.length){ project.parts=project.parts.filter(p=>p.id!==pid); continue; }
     const minNodes=part.closed?3:2;
+    const stSegs=captureStitchEdges(part);        // 部分ステッチの辺を控える
     byPart[pid].sort((a,b)=>b-a).forEach(i=>{ if(part.nodes.length>minNodes) part.nodes.splice(i,1); });
+    restoreStitchEdges(part, stSegs);             // 点が減っても同じ辺に残す
   }
   multiSel=[]; selectedPartId=null; saveLocal(); render();
 }
@@ -1650,6 +1685,11 @@ function edgeEnds(ed){
   if (!ring || ring.length < 2) return null;
   const closed = (ed.hole===undefined) ? part.closed : true;
   const n = ring.length;
+  // 選んだあとに点が減ると、覚えている辺の番号が無くなる。
+  // ここで断らないと、辺の両端が undefined のまま描画へ渡り、
+  // 以後まったく描き直せなくなる（画面が固まったように見えた）。
+  const segCount = closed ? n : n-1;
+  if (!(ed.i >= 0 && ed.i < segCount)) return null;
   const j = (ed.i+1) % n;
   if (j===0 && !closed) return null;
   return { part, ring, closed, a: ring[ed.i], b: ring[j], ai: ed.i, bi: j };
@@ -1998,6 +2038,7 @@ function booleanSelection(op){
   const holeRings = withArea.filter(w=>isHole(w.r)).map(w=>ringToNodes(ringCCW(w.r), FIT_TOL));
   const at = project.parts.indexOf(base);
   const made = [];
+  const stSegs = captureStitchEdges(base);   // 部分ステッチの辺を控える（輪郭が作り直されるため）
   outers.forEach((w, k)=>{
     const nodes = ringToNodes(ringCCW(w.r), FIT_TOL);
     let p;
@@ -2018,6 +2059,8 @@ function booleanSelection(op){
     }
     made.push(p);
   });
+  // 部分ステッチは、元と同じ場所の辺へ付け直す（番号のままだと別の辺に移る）
+  for (const p of made) restoreStitchEdges(p, stSegs);
   // 穴は、それを囲んでいるパーツにあずける
   for (const h of holeRings){
     const owner = made.find(p=>pointInRing(h[0], flattenNodes(p.nodes, true))) || made[0];
@@ -2121,6 +2164,7 @@ function knifeCut(part, a, b){
   p2[0].hIn = null; p2[p2.length-1].hOut = null;
 
   pushUndo();
+  const stSegs = captureStitchEdges(part);      // 部分ステッチの辺を控える
   const at = project.parts.indexOf(part);
   const mkPiece = (nodes, suffix)=>{
     const c = JSON.parse(JSON.stringify(part));
@@ -2133,6 +2177,7 @@ function knifeCut(part, a, b){
     return c;
   };
   const A = mkPiece(p1, "①"), B = mkPiece(p2, "②");
+  restoreStitchEdges(A, stSegs); restoreStitchEdges(B, stSegs);   // 切れ端それぞれに付け直す
   // 合印は、近いほうの切れ端に付け替える
   for (const nt of (part.notches||[])){
     const dA = nearestOnOutline(flattenNodes(A.nodes, true), nt, true).d;
@@ -2265,8 +2310,9 @@ function beginScale(h, wp){
   const partIds = [...new Set(multiSel.map(m=>m.partId))];
   scaleDrag = {
     h, anchor:{ x:h.ax, y:h.ay }, from:{ x:h.x, y:h.y },
-    nodes: multiSel.map(m=>{ const nd=nodeOf(m); return { partId:m.partId, idx:m.idx, hole:m.hole, x:nd.x, y:nd.y,
-      hIn: nd.hIn?{...nd.hIn}:null, hOut: nd.hOut?{...nd.hOut}:null }; }),
+    // 実在する点だけ控える（消えたパーツの点が選択に残っていても落ちないように）
+    nodes: multiSel.map(m=>{ const nd=nodeOf(m); return nd ? { partId:m.partId, idx:m.idx, hole:m.hole, x:nd.x, y:nd.y,
+      hIn: nd.hIn?{...nd.hIn}:null, hOut: nd.hOut?{...nd.hOut}:null } : null; }).filter(Boolean),
     notches: captureNotches(multiSel),
     holes: captureHoles(multiSel).map(o=>{ const nd=holeNodeOf(o);
       return { ...o, hIn: nd&&nd.hIn?{...nd.hIn}:null, hOut: nd&&nd.hOut?{...nd.hOut}:null }; }),
@@ -3766,8 +3812,10 @@ function insertNodeOnSegment(part, i, t, hole){
   if (j===0 && !closed) return false;               // 開いた線の終端の先は無い
   const sc = segControls(nodes, i, closed);
   const A = nodes[i], B = nodes[j];
+  const stSegs = (hole===undefined || hole===null) ? captureStitchEdges(part) : null;
   if (sc.straight){                                  // 直線はその位置に足すだけ
     nodes.splice(i+1, 0, { x:A.x+(B.x-A.x)*t, y:A.y+(B.y-A.y)*t, hIn:null, hOut:null });
+    restoreStitchEdges(part, stSegs);
     return true;
   }
   const L = (p,q,u)=>({ x:p.x+(q.x-p.x)*u, y:p.y+(q.y-p.y)*u });
@@ -3779,6 +3827,7 @@ function insertNodeOnSegment(part, i, t, hole){
   B.hIn  = { x:Q2.x-B.x, y:Q2.y-B.y };
   nodes.splice(i+1, 0, { x:S.x, y:S.y,
     hIn:{ x:R0.x-S.x, y:R0.y-S.y }, hOut:{ x:R1.x-S.x, y:R1.y-S.y } });
+  restoreStitchEdges(part, stSegs);
   return true;
 }
 // 選んである点のうち、隣り合う組の間に中間ポイントを入れる
@@ -5131,7 +5180,9 @@ function filletNode(part, idx, radius, hole){
   }
   const nodeA = { x:T1.x, y:T1.y, hIn:aIn,                            hOut:{ x:fwd1.x*k,  y:fwd1.y*k  } };
   const nodeB = { x:T2.x, y:T2.y, hIn:{ x:-fwd2.x*k, y:-fwd2.y*k },  hOut:bOut };
+  const stSegs = (hole===undefined) ? captureStitchEdges(part) : null;   // 部分ステッチの辺を控える
   nodes.splice(idx, 1, nodeA, nodeB);
+  restoreStitchEdges(part, stSegs);                                      // 同じ場所の辺へ付け直す
   return true;
 }
 function findPartAt(worldPt){
@@ -5551,6 +5602,9 @@ svg.addEventListener("mousedown", (e)=>{
     selectedPartId = v.part.id; selMode="points";
     if (multiSel.length===2){
       const a = nodeOf(multiSel[0]), b = nodeOf(multiSel[1]);
+      // 前のツールで選んだ点が残っていて、その後に消えている場合がある。
+      // そのまま計算すると落ちるので、選び直しにする。
+      if (!a || !b){ multiSel = [{ partId:v.part.id, idx:v.idx }]; clearMeasure(); render(); return; }
       const L = Math.hypot(b.x-a.x, b.y-a.y);
       measure = { kind:"dist", partId:v.part.id, value:L, a:{x:a.x,y:a.y}, b:{x:b.x,y:b.y},
                   path:[{x:a.x,y:a.y},{x:b.x,y:b.y}], label: fmtMM(L) };
@@ -7598,7 +7652,7 @@ function applyLoaded(obj, name){
     project.name = name.replace(/\.json$/i, "");
   }
   normalizeAllParts();
-  idCounter = Math.max(1, ...project.parts.map(p=>parseInt((p.id||"p0").slice(1))||0)) + 1;
+  resyncIdCounter();
   selectedPartId = null; draft = null; multiSel = []; selTexts = []; selVertex = null; selEdge = null;
   savedToFile = true;
   saveLocal(); fitView();
@@ -7756,7 +7810,7 @@ document.getElementById("file-input").addEventListener("change", (e)=>{
       project = obj;
       normalizeAllParts();
       // ensure ids unique counter
-      idCounter = Math.max(1, ...project.parts.map(p=>parseInt((p.id||"p0").slice(1))||0)) + 1;
+      resyncIdCounter();
       selectedPartId = null; draft = null; multiSel = []; selTexts = [];
       savedToFile = true;
       // こちらは古いやり方（ファイルの場所を覚えられない）。前の保存先は忘れる。
@@ -7775,6 +7829,20 @@ function cleanForSave(){ for (const p of project.parts) delete p.symPair; }
 // 前は catch で握りつぶしていたので、保存できていないのに気づけず、
 // 開き直したら前の状態に戻っている、ということが起こり得た。
 let saveBroken = false;
+// 新しいIDの採番を、いま入っている一番大きい番号の次から始める。
+//
+// 採番は project 全体でひとつの番号を使い回している（p1 / t2 / g3 / L4 …）。
+// 読み込みのときにパーツ(p)の番号しか見ていないと、文字・グループ・レイヤーが
+// 使った番号を見落とし、開き直したあとに作った物へ同じIDを振ってしまう。
+// 実際、文字を1つ消したつもりで、同じIDの別の文字まで一緒に消えていた。
+function resyncIdCounter(){
+  let max = 0;
+  const scan = (id)=>{ const n = parseInt(String(id||"").slice(1), 10); if (isFinite(n) && n > max) max = n; };
+  for (const p of (project.parts||[])){ scan(p.id); scan(p.group); }
+  for (const t of (project.texts||[])){ scan(t.id); scan(t.group); }
+  for (const l of (project.layers||[])) scan(l.id);
+  idCounter = max + 1;
+}
 function saveLocal(){
   cleanForSave();
   try {
@@ -7807,7 +7875,7 @@ function markSaveState(ok){
 function loadLocal(){
   try {
     const s = localStorage.getItem("sewing-project");
-    if (s){ const obj = JSON.parse(s); if (obj && obj.parts){ project = obj; normalizeAllParts(); idCounter = Math.max(1, ...project.parts.map(p=>parseInt((p.id||"p0").slice(1))||0)) + 1; } }
+    if (s){ const obj = JSON.parse(s); if (obj && obj.parts){ project = obj; normalizeAllParts(); resyncIdCounter(); } }
   } catch(e){}
 }
 
