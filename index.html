@@ -4765,32 +4765,182 @@ function duplicatePart(part, dx, dy){
   selectedPartId = copy.id;
   return copy;
 }
+// ----- 接円弧の下ごしらえ（辺を3次ベジェとして扱う） -----
+// まっすぐな辺も「3等分の制御点」を持つベジェにしておくと、tと距離が正比例するので扱いやすい。
+function cubOfSeg(A, c1, c2, B, straight){
+  if (straight) return [ { x:A.x, y:A.y },
+                         { x:A.x+(B.x-A.x)/3,   y:A.y+(B.y-A.y)/3   },
+                         { x:A.x+(B.x-A.x)*2/3, y:A.y+(B.y-A.y)*2/3 },
+                         { x:B.x, y:B.y } ];
+  return [ { x:A.x, y:A.y }, { x:c1.x, y:c1.y }, { x:c2.x, y:c2.y }, { x:B.x, y:B.y } ];
+}
+function cubAt(P, t){
+  const u = 1-t, a = u*u*u, b = 3*u*u*t, c = 3*u*t*t, d = t*t*t;
+  return { x: a*P[0].x + b*P[1].x + c*P[2].x + d*P[3].x,
+           y: a*P[0].y + b*P[1].y + c*P[2].y + d*P[3].y };
+}
+// その場所で進んでいる向き（長さ1）。制御点が重なって微分が0になる所は前後の差で代用する。
+function cubDir(P, t){
+  const u = 1-t;
+  let dx = 3*u*u*(P[1].x-P[0].x) + 6*u*t*(P[2].x-P[1].x) + 3*t*t*(P[3].x-P[2].x);
+  let dy = 3*u*u*(P[1].y-P[0].y) + 6*u*t*(P[2].y-P[1].y) + 3*t*t*(P[3].y-P[2].y);
+  let l = Math.hypot(dx, dy);
+  if (l < 1e-9){
+    const h = 1e-3, q0 = cubAt(P, Math.max(0,t-h)), q1 = cubAt(P, Math.min(1,t+h));
+    dx = q1.x-q0.x; dy = q1.y-q0.y; l = Math.hypot(dx, dy);
+    if (l < 1e-12) return null;
+  }
+  return { x:dx/l, y:dy/l };
+}
+// 弧の長さの表（見当をつけるのと、はみ出し防止に使う）
+function cubArcTable(P, steps){
+  steps = steps || 48;
+  const cum = [0]; let prev = cubAt(P, 0), total = 0;
+  for (let i=1;i<=steps;i++){
+    const q = cubAt(P, i/steps);
+    total += Math.hypot(q.x-prev.x, q.y-prev.y); cum.push(total); prev = q;
+  }
+  return { cum, steps, total };
+}
+// 「角から長さ s だけ進んだ所」の t
+function cubTAtLen(tbl, s){
+  if (s <= 0) return 0;
+  if (s >= tbl.total) return 1;
+  for (let i=1;i<=tbl.steps;i++){
+    if (tbl.cum[i] >= s){
+      const seg = tbl.cum[i]-tbl.cum[i-1] || 1;
+      return (i-1 + (s-tbl.cum[i-1])/seg) / tbl.steps;
+    }
+  }
+  return 1;
+}
+function cubSplit(P, t){
+  const L = (p,q,u)=>({ x:p.x+(q.x-p.x)*u, y:p.y+(q.y-p.y)*u });
+  const Q0=L(P[0],P[1],t), Q1=L(P[1],P[2],t), Q2=L(P[2],P[3],t);
+  const R0=L(Q0,Q1,t), R1=L(Q1,Q2,t);
+  const S = L(R0,R1,t);
+  return { a:[P[0],Q0,R0,S], b:[S,R1,Q2,P[3]] };
+}
+
 // Round a corner node with a tangent circular arc (fillet) of the given radius.
+// 両隣の辺が曲がっていても、その曲線に接する所を探して丸める。
+// （以前は隣の点への直線で当たりを付けていたので、曲線の隣だと接点の位置がずれ、
+//   元のハンドルも捨てられて辺が直線に潰れたりループができたりした）
 function filletNode(part, idx, radius, hole){
   const nodes = ringOfPart(part, hole);
   if (!nodes) return false;
   const n = nodes.length, closed = (hole===undefined) ? part.closed : true;   // 穴の輪はいつも閉じている
   if (n < 3) return false;
   if (!closed && (idx===0 || idx===n-1)) return false; // endpoints of an open path have one edge
-  const cur = nodes[idx];
-  const prev = nbNode(nodes, idx-1, closed);
-  const next = nbNode(nodes, idx+1, closed);
-  let v1 = { x: prev.x-cur.x, y: prev.y-cur.y }; const l1 = Math.hypot(v1.x,v1.y);
-  let v2 = { x: next.x-cur.x, y: next.y-cur.y }; const l2 = Math.hypot(v2.x,v2.y);
-  if (l1<1e-6 || l2<1e-6) return false;
-  v1 = { x:v1.x/l1, y:v1.y/l1 }; v2 = { x:v2.x/l2, y:v2.y/l2 };
-  const dot = Math.max(-1, Math.min(1, v1.x*v2.x + v1.y*v2.y));
-  const angle = Math.acos(dot); // angle between the two edges at the corner
-  if (angle < 0.01 || Math.PI-angle < 0.01) return false; // nearly straight
-  let d = radius / Math.tan(angle/2);           // distance from corner to each tangent point
-  d = Math.min(d, l1*0.98, l2*0.98);            // clamp so tangent points stay on the edges
-  const R = d * Math.tan(angle/2);              // actual radius after clamping
-  const arcAngle = Math.PI - angle;             // arc sweep
-  const k = (4/3) * Math.tan(arcAngle/4) * R;   // cubic-bézier handle length for a circular arc
-  const T1 = { x: cur.x + v1.x*d, y: cur.y + v1.y*d };
-  const T2 = { x: cur.x + v2.x*d, y: cur.y + v2.y*d };
-  const nodeA = { x:T1.x, y:T1.y, hIn:null,                       hOut:{ x:-v1.x*k, y:-v1.y*k } };
-  const nodeB = { x:T2.x, y:T2.y, hIn:{ x:-v2.x*k, y:-v2.y*k },  hOut:null };
+  if (!(radius > 0)) return false;
+  const iPrev = ((idx-1)%n+n)%n, iNext = (idx+1)%n;
+  const cur = nodes[idx], prev = nodes[iPrev], next = nodes[iNext];
+  const segIn  = segControls(nodes, iPrev, closed);   // prev → cur
+  const segOut = segControls(nodes, idx,   closed);   // cur  → next
+  const cIn  = cubOfSeg(prev, segIn.c1,  segIn.c2,  cur,  segIn.straight);
+  const cOut = cubOfSeg(cur,  segOut.c1, segOut.c2, next, segOut.straight);
+  // 角を起点にして、外へ向かう2本の曲線にそろえる（t=0 が角）
+  const A = [cIn[3], cIn[2], cIn[1], cIn[0]];         // 角 → prev（向きを逆に）
+  const B = cOut;                                     // 角 → next
+  const uA = cubDir(A, 0), uB = cubDir(B, 0);
+  if (!uA || !uB) return false;
+  const dot = Math.max(-1, Math.min(1, uA.x*uB.x + uA.y*uB.y));
+  const angle = Math.acos(dot);                       // 角の開き（曲線の接線どうし）
+  if (angle < 0.02 || Math.PI-angle < 0.02) return false;  // なめらかに繋がっている＝丸める角が無い
+  // 円の中心がある側＝角の二等分線の向き
+  let bx = uA.x+uB.x, by = uA.y+uB.y;
+  const bl = Math.hypot(bx, by);
+  if (bl < 1e-9) return false;
+  bx /= bl; by /= bl;
+  const tblA = cubArcTable(A), tblB = cubArcTable(B);
+  const tanHalf = Math.tan(angle/2);
+  // 進む向きの左右どちらに中心があるか。角の所で一度だけ決めて、その後はずっと同じ回し方をする。
+  // （途中で判定し直すと、よく曲がった辺では向きが裏返って計算が発散する）
+  const sideOf = (w)=> ((-w.y)*bx + w.x*by) >= 0 ? 1 : -1;
+  const sA = sideOf(uA), sB = sideOf(uB);
+  const center = (P, t, R, s)=>{
+    const q = cubAt(P, t), w = cubDir(P, t);
+    if (!w) return null;
+    return { x:q.x - w.y*s*R, y:q.y + w.x*s*R };
+  };
+  // 半径Rの円が両方の曲線に接する接点をニュートン法で探す
+  // （どちらの側から見ても円の中心が同じ場所になる t1,t2 を求める）
+  const HI = 0.999;
+  const solve = (R, seed)=>{
+    let t1 = seed ? seed.t1 : cubTAtLen(tblA, R/tanHalf);
+    let t2 = seed ? seed.t2 : cubTAtLen(tblB, R/tanHalf);
+    t1 = Math.min(HI, Math.max(1e-4, t1)); t2 = Math.min(HI, Math.max(1e-4, t2));
+    for (let it=0; it<60; it++){
+      const g1 = center(A,t1,R,sA), g2 = center(B,t2,R,sB);
+      if (!g1 || !g2) return null;
+      const Fx = g1.x-g2.x, Fy = g1.y-g2.y;
+      if (Math.hypot(Fx,Fy) < 1e-9*Math.max(1,R)) break;
+      const h = 1e-4;
+      const a1 = Math.max(0,t1-h), b1 = Math.min(1,t1+h);
+      const a2 = Math.max(0,t2-h), b2 = Math.min(1,t2+h);
+      const p1 = center(A,a1,R,sA), q1 = center(A,b1,R,sA);
+      const p2 = center(B,a2,R,sB), q2 = center(B,b2,R,sB);
+      if (!p1||!q1||!p2||!q2) return null;
+      const d1x = (q1.x-p1.x)/(b1-a1), d1y = (q1.y-p1.y)/(b1-a1);
+      const d2x = (q2.x-p2.x)/(b2-a2), d2y = (q2.y-p2.y)/(b2-a2);
+      const det = d1x*(-d2y) - (-d2x)*d1y;              // [d1  -d2] の行列式
+      if (Math.abs(det) < 1e-12) return null;
+      let s1 = ((-Fx)*(-d2y) - (-d2x)*(-Fy)) / det;
+      let s2 = (d1x*(-Fy) - (-Fx)*d1y) / det;
+      if (!isFinite(s1) || !isFinite(s2)) return null;
+      const big = Math.max(Math.abs(s1), Math.abs(s2));   // 一気に飛びすぎない（行ったり来たりを防ぐ）
+      if (big > 0.2){ s1 *= 0.2/big; s2 *= 0.2/big; }
+      t1 = Math.min(HI, Math.max(1e-4, t1+s1));
+      t2 = Math.min(HI, Math.max(1e-4, t2+s2));
+    }
+    const g1 = center(A,t1,R,sA), g2 = center(B,t2,R,sB);
+    if (!g1 || !g2) return null;
+    if (Math.hypot(g1.x-g2.x, g1.y-g2.y) > Math.max(0.002, R*0.002)) return null;  // 収束しなかった
+    return { t1, t2, R };
+  };
+  // まず辺の長さからはみ出さない大きさに丸めてから解く
+  const R0 = Math.min(radius, Math.min(tblA.total, tblB.total)*0.98*tanHalf);
+  if (!(R0 > 1e-4)) return false;
+  let sol = solve(R0);
+  if (!sol){
+    // その半径では入らない（辺の曲がりがきつい）ときは、
+    // 小さい方から少しずつ大きくしていって、入る一番大きい半径を採る。
+    // 前の答えを次の出発点にすると、すぐ収束する。
+    let prev = null, lo = 0, hi = R0, N = 16;
+    for (let i=1;i<=N;i++){
+      const Rk = R0*i/N, s = solve(Rk, prev);
+      if (!s){ hi = Rk; break; }
+      prev = s; lo = Rk;
+    }
+    for (let k=0; k<8 && prev; k++){          // 境目をもう少し詰める
+      const mid = (lo+hi)/2, s = solve(mid, prev);
+      if (s){ prev = s; lo = mid; } else hi = mid;
+    }
+    sol = prev;
+  }
+  if (!sol) return false;
+  const R = sol.R;
+  const T1 = cubAt(A, sol.t1), T2 = cubAt(B, sol.t2);
+  const dA = cubDir(A, sol.t1), dB = cubDir(B, sol.t2);
+  if (!dA || !dB) return false;
+  const fwd1 = { x:-dA.x, y:-dA.y };                 // T1 での進行方向（prev→cur 向き）
+  const fwd2 = dB;                                   // T2 での進行方向（cur→next 向き）
+  const sweep = Math.acos(Math.max(-1, Math.min(1, fwd1.x*fwd2.x + fwd1.y*fwd2.y)));
+  const k = (4/3) * Math.tan(sweep/4) * R;           // 円弧に近い3次ベジェの腕の長さ
+  let aIn = null, bOut = null;
+  // 手前の辺：曲がっていれば接点で切り分ける（まっすぐならハンドル無しのまま）
+  if (!segIn.straight){
+    const sp = cubSplit(cIn, 1 - sol.t1);            // prev→cur 側のパラメータに直す
+    prev.hOut = { x: sp.a[1].x-prev.x, y: sp.a[1].y-prev.y };
+    aIn       = { x: sp.a[2].x-T1.x,   y: sp.a[2].y-T1.y   };
+  }
+  if (!segOut.straight){
+    const sp = cubSplit(cOut, sol.t2);
+    bOut      = { x: sp.b[1].x-T2.x,   y: sp.b[1].y-T2.y   };
+    next.hIn  = { x: sp.b[2].x-next.x, y: sp.b[2].y-next.y };
+  }
+  const nodeA = { x:T1.x, y:T1.y, hIn:aIn,                            hOut:{ x:fwd1.x*k,  y:fwd1.y*k  } };
+  const nodeB = { x:T2.x, y:T2.y, hIn:{ x:-fwd2.x*k, y:-fwd2.y*k },  hOut:bOut };
   nodes.splice(idx, 1, nodeA, nodeB);
   return true;
 }
