@@ -1471,6 +1471,7 @@ function findMidEdgeAt(sp, partId){
   return best.d < 11 ? { part, i: best.i, hole: best.hole } : null;
 }
 let shapeDrag = null;       // {start:{x,y}} while dragging out a rectangle/ellipse
+let shiftDown = false;      // Shiftを押しているか（下描きを「まっすぐ」に見せるのに使う）
 let editingTextId = null;   // id of the text currently open in the inline editor
 let editSnap = null;        // project snapshot captured when the text editor opened
 let newTextFresh = false;   // the text being edited was just created (cancel removes it)
@@ -4237,17 +4238,51 @@ function updateActionBar(){
   if (!canBool && typeof closeBoolMenu==="function") closeBoolMenu();
 }
 
+// Shift を押しながらだと、きれいな正方形・真円になるように角をそろえる。
+// 縦横の長いほうに合わせるので、どちら向きに引っぱっても向きはそのまま。
+// グリッドに吸着したあとで合わせるので、大きさもきりのいい数のままになる。
+function squareCorner(a, b, on){
+  if (!on) return b;
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const s = Math.max(Math.abs(dx), Math.abs(dy));
+  return { x: a.x + (dx < 0 ? -s : s), y: a.y + (dy < 0 ? -s : s) };
+}
+// 小さすぎる（＝ただのクリック）なら作らない
+function shapeSizeOK(a, b){ return Math.abs(a.x-b.x) > 2 && Math.abs(a.y-b.y) > 2; }
+// Shift を押している間は、45度ごと（水平・垂直・斜め）に向きをそろえる。
+// 線・矢印・寸法線・ペンで使う。水平と垂直は片方の座標をそのまま残すので、
+// グリッドに乗った位置のまま「まっすぐ」引ける。
+function angleSnap(a, b, on){
+  if (!on || !a) return b;
+  const dx = b.x-a.x, dy = b.y-a.y;
+  const ax = Math.abs(dx), ay = Math.abs(dy);
+  if (ax < 1e-9 && ay < 1e-9) return b;
+  if (ax > ay*2.4142) return { x:b.x, y:a.y };           // ほぼ水平 → 水平に
+  if (ay > ax*2.4142) return { x:a.x, y:b.y };           // ほぼ垂直 → 垂直に
+  const s = (ax+ay)/2;                                    // それ以外 → 45度
+  return { x: a.x + (dx<0?-s:s), y: a.y + (dy<0?-s:s) };
+}
+// 引っぱっている最中に Shift を押した／離した時も、下描きをすぐ切り替える
+for (const type of ["keydown","keyup"]){
+  window.addEventListener(type, (e)=>{
+    if (e.key !== "Shift") return;
+    shiftDown = (type === "keydown");
+    if (shapeDrag || draft || penDrag) renderThrottled();
+  });
+}
 function renderShapePreview(){
   if (!shapeDrag) return;
   const a = shapeDrag.start, b = maybeSnap(mouseWorld);
   if (tool==="arrow"){
-    const sa = worldToScreen(a), sb = worldToScreen(b);
+    const q = angleSnap(a, b, shiftDown);              // Shiftで水平・垂直・45度
+    const sa = worldToScreen(a), sb = worldToScreen(q);
     gDraft.appendChild(mk("path", { d:`M${sa.x} ${sa.y} L${sb.x} ${sb.y}`, class:"arrowline", stroke:"#2563eb" }));
     addArrowHead(gDraft, sb, sa, "#2563eb", 11);
     return;
   }
   if (tool==="dim"){
-    const c = snapToVertex(mouseWorld);
+    // Shift のときは点への吸着より「まっすぐ」を優先する
+    const c = shiftDown ? angleSnap(a, maybeSnap(mouseWorld), true) : snapToVertex(mouseWorld);
     const sa = worldToScreen(a), sb = worldToScreen(c);
     gDraft.appendChild(mk("path", { d:`M${sa.x} ${sa.y} L${sb.x} ${sb.y}`, class:"dimline", stroke:"#2563eb" }));
     addArrowHead(gDraft, sa, sb, "#2563eb", 9);
@@ -4257,12 +4292,16 @@ function renderShapePreview(){
     gDraft.appendChild(t);
     return;
   }
-  const nodes = (tool==="rect") ? rectNodes(a,b) : ellipseNodes(a,b);
+  const c = squareCorner(a, b, shiftDown);             // Shiftで正方形・真円
+  // 作る時と同じ判定にする。ここだけ「rect以外は丸」にすると、
+  // 左右対称（symrect）の下描きが丸になって、出来上がりと違って見える。
+  const nodes = (tool==="ellipse") ? ellipseNodes(a,c) : rectNodes(a,c);
   gDraft.appendChild(mk("path", { d: nodesScreenPath(nodes, true), class:"draft-line", "stroke-dasharray":"5 4" }));
-  const wmm=Math.round(Math.abs(a.x-b.x)), hmm=Math.round(Math.abs(a.y-b.y));
-  const mid=worldToScreen({ x:(a.x+b.x)/2, y:(a.y+b.y)/2 });
+  const wmm=Math.round(Math.abs(a.x-c.x)), hmm=Math.round(Math.abs(a.y-c.y));
+  const mid=worldToScreen({ x:(a.x+c.x)/2, y:(a.y+c.y)/2 });
   const t=mk("text", { x:mid.x, y:mid.y, class:"edge-len", "text-anchor":"middle", "dominant-baseline":"middle" });
-  t.textContent = `${wmm}×${hmm}`; gDraft.appendChild(t);
+  t.textContent = shiftDown ? `${wmm}×${hmm}（${tool==="ellipse"?"真円":"正方形"}）` : `${wmm}×${hmm}`;
+  gDraft.appendChild(t);
 }
 // 計測の結果を画面に重ねて見せる（図面データには残らない）
 function renderMeasure(){
@@ -4717,7 +4756,9 @@ function renderDraft(){
   if (!penDrag){
     const last = nodes[nodes.length-1];
     const c1 = last.hOut ? { x:last.x+last.hOut.x, y:last.y+last.hOut.y } : last;
-    const ls = worldToScreen(last), cs = worldToScreen(c1), ms = worldToScreen(mouseWorld);
+    // Shift のときは、次に置かれる場所（水平・垂直・45度）を下描きに出す
+    const target = shiftDown ? angleSnap(last, maybeSnap(mouseWorld), true) : mouseWorld;
+    const ls = worldToScreen(last), cs = worldToScreen(c1), ms = worldToScreen(target);
     frag.appendChild(mk("path", { d:`M${ls.x.toFixed(1)} ${ls.y.toFixed(1)} C${cs.x.toFixed(1)} ${cs.y.toFixed(1)} ${ms.x.toFixed(1)} ${ms.y.toFixed(1)} ${ms.x.toFixed(1)} ${ms.y.toFixed(1)}`, class:"draft-line", "stroke-dasharray":"4 4", opacity:0.55 }));
   }
   for (const n of nodes) drawNodeGizmo(frag, n);
@@ -5575,6 +5616,7 @@ function cancelDraft(){ draft = null; render(); }
 // ===== Event handling =====
 svg.addEventListener("mousedown", (e)=>{
   svgRect = svg.getBoundingClientRect();   // toolbar height can change -> refresh once per gesture
+  shiftDown = e.shiftKey;
   // 図面の上で押した時は、ブラウザの文字選択を始めさせない（文字が青く反転するのを防ぐ）
   if (editingTextId==null) e.preventDefault();
   // Macだけ「control+クリック＝右クリック」。Windowsでは Ctrl は Ctrl+Z などを
@@ -6035,7 +6077,9 @@ svg.addEventListener("mousedown", (e)=>{
       if (Math.hypot(sp.x-s0.x, sp.y-s0.y) < 12){ commitDraft(); return; }
     }
     // place an anchor; drag before releasing pulls out symmetric bézier handles
-    const p = maybeSnap(wp);
+    // Shift のときは、ひとつ前の点から見て水平・垂直・45度の位置に置く
+    const prev = (draft && draft.nodes.length) ? draft.nodes[draft.nodes.length-1] : null;
+    const p = angleSnap(prev, maybeSnap(wp), e.shiftKey);
     if (!draft) draft = { nodes: [], kind: (tool==="stitch" ? "stitch" : tool==="zip" ? "zip" : "part") };
     const node = { x:p.x, y:p.y, hIn:null, hOut:null };
     draft.nodes.push(node);
@@ -6047,6 +6091,7 @@ svg.addEventListener("mousedown", (e)=>{
 svg.addEventListener("mousemove", (e)=>{
   const sp = svgPoint(e);
   mouseWorld = screenToWorld(sp.x, sp.y);
+  shiftDown = e.shiftKey;
   // control を押しているだけ（押し込み不要）で画面移動 — Macのトラックパッド用。
   // Windowsのタッチパッドは二本指でなぞるだけで画面が動く（ホイールが飛んでくる）ので不要。
   // むしろ Ctrl を握ったままマウスを動かすと図面が勝手に滑るため、Macだけに限る。
@@ -6236,20 +6281,23 @@ window.addEventListener("mouseup", (e)=>{
   if (shapeDrag){
     const a = shapeDrag.start, b = maybeSnap(mouseWorld);
     if (tool==="dim"){
-      const e2 = snapToVertex(mouseWorld);
+      // Shift のときは点への吸着より「まっすぐ」を優先する
+      const e2 = e.shiftKey ? angleSnap(a, maybeSnap(mouseWorld), true) : snapToVertex(mouseWorld);
       if (Math.hypot(a.x-e2.x, a.y-e2.y) > 3){
         const p = newPart([{x:a.x,y:a.y,hIn:null,hOut:null},{x:e2.x,y:e2.y,hIn:null,hOut:null}], false);
         p.kind = "dim"; p.color = "#111827";
       }
     } else if (tool==="arrow"){
-      if (Math.hypot(a.x-b.x, a.y-b.y) > 3){
-        const p = newPart([{x:a.x,y:a.y,hIn:null,hOut:null},{x:b.x,y:b.y,hIn:null,hOut:null}], false);
+      const q = angleSnap(a, b, e.shiftKey);              // Shiftで水平・垂直・45度
+      if (Math.hypot(a.x-q.x, a.y-q.y) > 3){
+        const p = newPart([{x:a.x,y:a.y,hIn:null,hOut:null},{x:q.x,y:q.y,hIn:null,hOut:null}], false);
         p.kind = "arrow"; p.color = "#111827";
       }
-    } else if (Math.abs(a.x-b.x) > 2 && Math.abs(a.y-b.y) > 2){
-      const nodes = (tool==="ellipse") ? ellipseNodes(a,b) : rectNodes(a,b);
+    } else if (shapeSizeOK(a, squareCorner(a, b, e.shiftKey))){
+      const c = squareCorner(a, b, e.shiftKey);            // Shiftで正方形・真円
+      const nodes = (tool==="ellipse") ? ellipseNodes(a,c) : rectNodes(a,c);
       const np = newPart(nodes, true);   // gestureSnap (set on mousedown) makes this one undo step
-      if (tool==="symrect") np.symAxis = (a.x + b.x) / 2;   // 真ん中を対称の軸にする
+      if (tool==="symrect") np.symAxis = (a.x + c.x) / 2;   // 真ん中を対称の軸にする
     }
     shapeDrag = null;
   }
