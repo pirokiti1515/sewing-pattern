@@ -1433,11 +1433,20 @@ function eachRing(part, fn){
 function pointsInRect(x0,y0,x1,y1){
   const xa=Math.min(x0,x1), xb=Math.max(x0,x1), ya=Math.min(y0,y1), yb=Math.max(y0,y1);
   const res=[];
+  const inBox = (s)=> s.x>=xa && s.x<=xb && s.y>=ya && s.y<=yb;
   for (const part of project.parts){
+    // 寸法線は見えている線の位置で判定する。
+    // 元の2点は離れた所にあるので、線を囲んだつもりでも入らなかった。
+    const dim = dimDrawnSeg(part);
+    if (dim){
+      if (inBox(worldToScreen(dim.A2))) res.push({ partId:part.id, idx:0 });
+      if (inBox(worldToScreen(dim.B2))) res.push({ partId:part.id, idx:1 });
+      continue;
+    }
     eachRing(part, (ring, hole)=>{
       ring.forEach((nd,i)=>{
         const s = worldToScreen(nd);
-        if (s.x>=xa && s.x<=xb && s.y>=ya && s.y<=yb){
+        if (inBox(s)){
           res.push(hole===undefined ? { partId:part.id, idx:i } : { partId:part.id, idx:i, hole });
         }
       });
@@ -1938,8 +1947,11 @@ function booleanSelection(op){
   parts.sort((a,b)=> project.parts.indexOf(a) - project.parts.indexOf(b));
   let base = parts[0], cutter = parts[1];
 
-  let A = flattenNodes(base.nodes, true, 24);
-  let B = flattenNodes(cutter.nodes, true, 24);
+  // 折れ線の細かさは、あとで曲線に戻すときの許容(0.15mm)より十分細かくする。
+  // 粗いと弦のたわみが許容を超え、当てはめが永久に合格せず点が爆発する。
+  const FLAT_TOL = 0.03;
+  let A = flattenNodes(base.nodes, true, flattenStepsFor(base.nodes, true, FLAT_TOL));
+  let B = flattenNodes(cutter.nodes, true, flattenStepsFor(cutter.nodes, true, FLAT_TOL));
 
   // 片方がもう片方の中にすっぽり入っている場合、
   // 「小さいほう」を刃にしないと全部消えてしまう（＝押しても何も起きない）。
@@ -3105,11 +3117,18 @@ function fitSpan(pts, t1, t2, tol, depth){
   let bez = fitOne(pts, u, t1, t2);
   let err = maxFitError(pts, u, bez);
   if (err.max <= tol) return [bez];
+  // 割りふりを直してから当てはめ直す。
+  // 点の並びは「道のりの長さ」で割りふっているが、ベジェの t は道のりと比例しない。
+  // そのズレのせいで、元とまったく同じ曲線を当てはめ直しても誤差が数mm出る。
+  // 以前は「誤差が tol*8 以内の惜しい時だけ」直していたので、
+  // 大きな円弧は一度も直されないまま分割され、点が際限なく増えていた。
   if (depth < 14){
-    for (let k=0;k<6 && err.max <= tol*8; k++){       // 惜しい時は割りふりを直して粘る
-      u = reparam(pts, u, bez);
-      bez = fitOne(pts, u, t1, t2);
-      err = maxFitError(pts, u, bez);
+    for (let k=0;k<8;k++){
+      const u2 = reparam(pts, u, bez);
+      const bez2 = fitOne(pts, u2, t1, t2);
+      const err2 = maxFitError(pts, u2, bez2);
+      if (!(err2.max < err.max)) break;              // 良くならなければ、そこでやめる
+      u = u2; bez = bez2; err = err2;
       if (err.max <= tol) return [bez];
     }
   }
@@ -3120,18 +3139,174 @@ function fitSpan(pts, t1, t2, tol, depth){
   return fitSpan(pts.slice(0, at+1), t1, tc, tol, depth+1)
     .concat(fitSpan(pts.slice(at), vmul(tc,-1), t2, tol, depth+1));
 }
+// 折れ線を「まっすぐな所」と「曲がっている所」に切り分ける。
+// 切らずに一続きで曲線を当てはめると、直線の上にまで曲線の点が並んでしまう。
+// （合体したパーツの点が何倍にも増える原因だった。細かく刻んだ段階なら
+//   直線はほぼ0°、円弧は1点あたり数度と、はっきり分かれるので見分けられる）
+function bendFlags(pts, deg){
+  const n = pts.length, bend = new Array(n).fill(false);
+  for (let i=1;i<n-1;i++){
+    const v1x=pts[i].x-pts[i-1].x, v1y=pts[i].y-pts[i-1].y;
+    const v2x=pts[i+1].x-pts[i].x, v2y=pts[i+1].y-pts[i].y;
+    const l1=Math.hypot(v1x,v1y), l2=Math.hypot(v2x,v2y);
+    if (l1<1e-12 || l2<1e-12) continue;
+    const cos=(v1x*v2x+v1y*v2y)/(l1*l2);
+    bend[i] = Math.acos(Math.max(-1,Math.min(1,cos)))*180/Math.PI > deg;
+  }
+  return bend;
+}
+// 直線の途中はぴったり一直線（曲がり0°）なので、しきい値は小さくてよい。
+// 大きくすると、円弧の始まりの1点（曲がりが半歩ぶんしかない＝接点）を直線側に
+// 取り込んでしまい、そこから先の接線の向きが狂って当てはめが破綻する。
+// ゆるい曲線を拾いすぎる心配は、このあと許容ズレで判定し直すので要らない。
+const BEND_DEG = 0.05;
+function straightCurveRuns(pts){
+  const n = pts.length;
+  if (n < 4) return [{ s:0, e:n-1, curved:false }];
+  const bend = bendFlags(pts, BEND_DEG);
+  const m = n-1;                                  // 辺の数
+  const L = new Array(m);
+  for (let j=0;j<m;j++) L[j] = Math.hypot(pts[j+1].x-pts[j].x, pts[j+1].y-pts[j].y);
+  // 曲線は短い弦がずらりと並ぶ。まわりよりずっと長い辺は「直線1本」とみなす。
+  // 直線には途中の点が無いので、曲がり角だけでは曲線と区別できない
+  // （両端が円弧の接点だと、間の直線ごと1本の曲線に飲み込まれていた）。
+  // 端の点は前後がそろわないので、まっすぐの判断材料にしない
+  const flatAt = (i)=> (i>0 && i<n-1) && !bend[i];
+  const straightEdge = (j)=>{
+    const nb = Math.max(j>0 ? L[j-1] : 0, j<m-1 ? L[j+1] : 0);
+    if (nb > 0 && L[j] > nb*3) return true;     // まわりよりずっと長い＝直線が1本
+    return flatAt(j) || flatAt(j+1);            // どちらかの端が折れていない＝直線の続き
+  };
+  let runs = [];
+  let a = 0, cls = !straightEdge(0);
+  for (let j=1;j<m;j++){
+    const c = !straightEdge(j);
+    if (c !== cls){ runs.push({ s:a, e:j, curved:cls }); a = j; cls = c; }
+  }
+  runs.push({ s:a, e:m, curved:cls });
+  // 点が2つしかない区間は曲線にしようがない（＝ただの直線）
+  for (const r of runs) if (r.e - r.s < 2) r.curved = false;
+  // 同じ種類が続いたらつなぐ
+  const merged = [runs[0]];
+  for (let i=1;i<runs.length;i++){
+    const last = merged[merged.length-1];
+    if (runs[i].curved === last.curved) last.e = runs[i].e; else merged.push(runs[i]);
+  }
+  return merged;
+}
 // 一続きの点（角から角まで）を、ベジェ曲線の並びにする
 function fitPolyline(pts, tol){
   if (pts.length < 2) return [];
+  const isStraight = (sub)=>{
+    for (let i=1;i<sub.length-1;i++)
+      if (distPtSeg(sub[i], sub[0], sub[sub.length-1]) > tol) return false;
+    return true;
+  };
   // まっすぐなら曲線にしない（腕の無い、きれいな直線にする）
-  let straight = true;
-  for (let i=1;i<pts.length-1;i++){
-    if (distPtSeg(pts[i], pts[0], pts[pts.length-1]) > tol){ straight = false; break; }
+  if (isStraight(pts)) return [[ pts[0], null, null, pts[pts.length-1] ]];
+  const found = straightCurveRuns(pts);
+  // 曲がり角だけの見分けは当てにならないので、許容のズレで確かめ直す。
+  //  ・ゆるい曲線を細かく刻むと1点あたりの曲がりが小さく、まっすぐに見える
+  //    → 見破って曲線へ戻さないと、ひと続きの曲線が分断されて点が増える
+  //  ・逆に、ほんの少ししか曲がっていない所は直線にしてしまってよい
+  for (const r of found){
+    const sub = pts.slice(r.s, r.e+1);
+    r.curved = !isStraight(sub);
   }
-  if (straight) return [[ pts[0], null, null, pts[pts.length-1] ]];
-  const t1 = vnorm(vsub(pts[1], pts[0]));
-  const t2 = vnorm(vsub(pts[pts.length-2], pts[pts.length-1]));
-  return fitSpan(pts, t1, t2, tol, 0);
+  // 短すぎる直線は、となりの曲線に混ぜる。
+  // 区間を分けるたびに点が1つ増えるので、分けるだけの長さがある所だけ分ける。
+  const runLen = (r)=>{ let L=0; for (let i=r.s;i<r.e;i++) L += Math.hypot(pts[i+1].x-pts[i].x, pts[i+1].y-pts[i].y); return L; };
+  for (let i=0;i<found.length;i++){
+    const r = found[i];
+    if (r.curved) continue;
+    const nb = [found[i-1], found[i+1]].filter(x=>x && x.curved);
+    if (!nb.length) continue;
+    const chord = Math.max(...nb.map(x=> x.e>x.s ? runLen(x)/(x.e-x.s) : 0));
+    if (chord > 0 && runLen(r) < chord*5) r.curved = true;
+  }
+  const runs = [found[0]];
+  for (let i=1;i<found.length;i++){
+    const last = runs[runs.length-1];
+    if (found[i].curved === last.curved) last.e = found[i].e; else runs.push(found[i]);
+  }
+  if (runs.length <= 1){
+    const t1 = vnorm(vsub(pts[1], pts[0]));
+    const t2 = vnorm(vsub(pts[pts.length-2], pts[pts.length-1]));
+    return fitSpan(pts, t1, t2, tol, 0);
+  }
+  const out = [];
+  for (let r=0;r<runs.length;r++){
+    const rn = runs[r], sub = pts.slice(rn.s, rn.e+1);
+    if (sub.length < 2) continue;
+    if (!rn.curved){
+      out.push([ sub[0], null, null, sub[sub.length-1] ]);
+      continue;
+    }
+    // 曲がっている所。となりが直線なら、その向きに接するように当てはめる
+    // （接円弧で丸めた角は直線と接しているので、そこを合わせると継ぎ目が出ない）
+    const prev = runs[r-1], next = runs[r+1];
+    const t1 = (prev && !prev.curved) ? vnorm(vsub(pts[rn.s], pts[prev.s]))
+                                      : vnorm(vsub(sub[1], sub[0]));
+    const t2 = (next && !next.curved) ? vnorm(vsub(pts[rn.e], pts[next.e]))
+                                      : vnorm(vsub(sub[sub.length-2], sub[sub.length-1]));
+    out.push(...fitSpan(sub, t1, t2, tol, 0));
+  }
+  return out;
+}
+// 曲線を折れ線にするときの刻み数を、形の大きさに合わせて決める。
+//
+// 折れ線（弦）は本当の曲線より内側を通る。そのたわみが「曲線に戻すときの許容」より
+// 大きいと、なめらかな曲線は原理的に折れ線と一致できず、いくら分けても合格しない。
+// その結果、点1つにつき曲線1本まで分割されて点が爆発する（大きな円弧の合体で発生）。
+// たとえば半径300mmの90°円弧を24分割すると、たわみは0.16mm＝許容0.15mmを超える。
+function flattenStepsFor(nodes, closed, ftol){
+  let steps = 16;
+  const n = nodes.length, segCount = closed ? n : n-1;
+  for (let i=0;i<segCount;i++){
+    const sc = segControls(nodes, i, closed);
+    if (sc.straight) continue;
+    const bez = [ {x:sc.A.x,y:sc.A.y}, sc.c1, sc.c2, {x:sc.B.x,y:sc.B.y} ];
+    let k = 16;
+    while (k < 256){
+      let worst = 0;
+      for (let j=0;j<k;j++){
+        const a = bezPt(bez, j/k), b = bezPt(bez, (j+1)/k), mid = bezPt(bez, (j+0.5)/k);
+        const d = Math.hypot(mid.x-(a.x+b.x)/2, mid.y-(a.y+b.y)/2);   // 弦のたわみ
+        if (d > worst) worst = d;
+      }
+      if (worst <= ftol) break;
+      k *= 2;
+    }
+    if (k > steps) steps = k;
+  }
+  return Math.min(steps, 256);
+}
+// 一周をどこで切るか。一番長い辺の始点にする。
+// 一番長い辺はまず直線なので、そこを切れ目にすると区間の分かれ目と重なって
+// 継ぎ目が目立たない（円弧の途中で切ると、そこだけ折れて見える）。
+function seamIndex(ring){
+  const n = ring.length;
+  let best = -1, at = 0;
+  for (let i=0;i<n;i++){
+    const j = (i+1)%n;
+    const d = Math.hypot(ring[j].x-ring[i].x, ring[j].y-ring[i].y);
+    if (d > best){ best = d; at = i; }
+  }
+  return at;
+}
+// 同じ向きの直線が続いている所の、間の点を落とす。
+// 切れ目や区間の分かれ目で、一直線の途中に点が残ることがある。
+function dropCollinear(nodes, tol){
+  if (nodes.length < 4) return nodes;
+  const out = nodes.slice();
+  for (let i=out.length-1; i>=0; i--){
+    if (out.length <= 3) break;
+    const cur = out[i], prev = out[(i-1+out.length)%out.length], next = out[(i+1)%out.length];
+    if (cur.hIn || cur.hOut || prev.hOut || next.hIn) continue;   // 曲線の端は残す
+    if (distPtSeg(cur, prev, next) > tol) continue;
+    out.splice(i,1);
+  }
+  return out;
 }
 // 折れ線をパーツの点に戻す。角で区切って、その間ごとに曲線を当てはめる。
 function ringToNodes(ring, tol){
@@ -3142,14 +3317,19 @@ function ringToNodes(ring, tol){
   for (let i=0;i<n;i++) if (ring[i]._corner) corners.push(i);
   const cubics = [];
   if (corners.length <= 1){
-    // 角が1つも無い（まんまる／角丸だけの形）。どこか1点を切れ目にして、
-    // 一周ぐるりを「ひと続きの曲線」として当てはめる。
-    // 切れ目の向きは前後の点から出して、そこだけ折れて見えないようにする。
-    const s = corners.length ? corners[0] : 0;
+    // 角が1つも無い（まんまる／角丸だけの形）。どこか1点を切れ目にして一周を当てはめる。
+    // 切れ目は「一番長い直線の真ん中」に置く。円弧の途中で切ると継ぎ目が出るし、
+    // 直線の真ん中なら、そこに点が1つ増えても一直線のままで目立たない。
+    let s = corners.length ? corners[0] : 0;
+    if (!corners.length) s = seamIndex(ring);
     const pts = [];
     for (let k=0;k<=n;k++) pts.push({ x:ring[(s+k)%n].x, y:ring[(s+k)%n].y });
-    const t1 = vnorm(vsub(ring[(s+1)%n], ring[(s-1+n)%n]));
-    cubics.push(...fitSpan(pts, t1, vmul(t1,-1), tol, 0));
+    const fitted = fitPolyline(pts, tol);
+    if (fitted.length) cubics.push(...fitted);
+    else {
+      const t1 = vnorm(vsub(ring[(s+1)%n], ring[(s-1+n)%n]));
+      cubics.push(...fitSpan(pts, t1, vmul(t1,-1), tol, 0));
+    }
   } else {
     for (let c=0;c<corners.length;c++){
       const s = corners[c], e = corners[(c+1)%corners.length];
@@ -3168,7 +3348,7 @@ function ringToNodes(ring, tol){
       hIn:  prev[2] ? { x: prev[2].x - p.x, y: prev[2].y - p.y } : null,
       hOut: cur[1]  ? { x: cur[1].x  - p.x, y: cur[1].y  - p.y } : null });
   }
-  return nodes;
+  return dropCollinear(nodes, tol);
 }
 
 // 曲線の長さ。細かく刻んで足すほど本当の長さに近づく。
@@ -3218,22 +3398,32 @@ const hasHoles = (part)=> !!(part.holes && part.holes.length);
 // Insert a node onto the outline nearest to a world point (returns new index or -1).
 // 寸法線の描き方（寸法線ツールも、計測の書き込みも同じ形式）
 //   点A・点Bから引き出し線を立て、離れた位置に寸法線を渡して、真ん中に数値を置く。
+// 寸法線は、測った2点から離れた所（既定25mm）に描かれる。
+// 「見えている線」がどこに来るかを1か所で決める。
+// 描画と当たり判定で別々に計算していると、見えている線を押しても選べない
+// （実際にそうなっていた：クリックは2点を結ぶ線の上でしか当たらなかった）。
+function dimDrawnSeg(part){
+  if (!part || (part.kind!=="dim" && part.kind!=="mdim")) return null;
+  const A = part.nodes[0], B = part.nodes[1];
+  if (!A || !B) return null;
+  let ux=B.x-A.x, uy=B.y-A.y; const L=Math.hypot(ux,uy)||1; ux/=L; uy/=L;
+  let px=-uy, py=ux;
+  if (part.maxis && Number.isFinite(part.mpos)){
+    // 水平／垂直に固定した寸法線。2点の高さが違っても線はまっすぐ通す
+    if (part.maxis==="h")
+      return { A2:{x:A.x,y:part.mpos}, B2:{x:B.x,y:part.mpos}, px:0, py:(part.mpos<A.y?-1:1), off:1, L };
+    return   { A2:{x:part.mpos,y:A.y}, B2:{x:part.mpos,y:B.y}, px:(part.mpos<A.x?-1:1), py:0, off:1, L };
+  }
+  const off = (part.moff===undefined) ? 25 : part.moff;   // 辺と平行に逃がす距離(mm)
+  return { A2:{x:A.x+px*off, y:A.y+py*off}, B2:{x:B.x+px*off, y:B.y+py*off}, px, py, off, L };
+}
 function drawDimension(frag, part){
   const A = part.nodes[0], B = part.nodes[1];
   if (!A || !B) return;
   const col = part.color || "#111827";
-  let ux=B.x-A.x, uy=B.y-A.y; const L=Math.hypot(ux,uy)||1; ux/=L; uy/=L;
-  let px=-uy, py=ux;
-  let A2, B2, off;
-  if (part.maxis){
-    // 水平／垂直に固定した寸法線。2点の高さが違っても線はまっすぐ通す
-    if (part.maxis==="h"){ A2={x:A.x,y:part.mpos}; B2={x:B.x,y:part.mpos}; px=0; py=(part.mpos<A.y?-1:1); }
-    else                 { A2={x:part.mpos,y:A.y}; B2={x:part.mpos,y:B.y}; px=(part.mpos<A.x?-1:1); py=0; }
-    off = 1;
-  } else {
-    off = (part.moff===undefined) ? 25 : part.moff;   // 辺と平行に逃がす距離(mm)
-    A2 = { x:A.x+px*off, y:A.y+py*off }; B2 = { x:B.x+px*off, y:B.y+py*off };
-  }
+  const seg = dimDrawnSeg(part);
+  if (!seg) return;
+  const { A2, B2, px, py, off, L } = seg;
   const sa=worldToScreen(A2), sb=worldToScreen(B2);
 
   // 引き出し線（点から寸法線まで。少しはみ出させる）
@@ -5001,7 +5191,17 @@ function findLinePartAt(wp){
   const thr = 14 / view.scale;   // generous: thin lines are hard to hit exactly
   let best = { d: Infinity, part: null };
   for (const part of project.parts){
-    if (part.closed || part.nodes.length < 2) continue;
+    if (part.nodes.length < 2) continue;
+    // 寸法線は「見えている線」で当たりを見る。
+    // 測った2点はパーツの輪郭の上に乗っていることが多く、そちらで当てると
+    // パーツを選びたいクリックを寸法線が横取りしてしまう。
+    const dim = dimDrawnSeg(part);
+    if (dim){
+      const d = distToSeg(wp, dim.A2, dim.B2);
+      if (d < thr && d < best.d) best = { d, part };
+      continue;
+    }
+    if (part.closed) continue;
     const flat = flattenNodes(part.nodes, false);
     const near = nearestOnOutline(flat, wp, false);
     if (near.d < thr && near.d < best.d) best = { d: near.d, part };
