@@ -119,6 +119,30 @@
     border-radius: 6px; padding: 5px 8px; font-size: 13px; cursor: pointer; line-height: 1;
   }
   #action-bar button:hover { background: #4b5563; }
+  /* パーツの合体：アイコンを押すと、その下にメニューが開く（Affinity と同じ感じ） */
+  .bool-wrap { position: relative; display: inline-flex; }
+  #ab-bool { display: inline-flex; align-items: center; gap: 3px; padding: 4px 6px; }
+  #ab-bool.open { background: #1f2937; border-color: #93c5fd; }
+  #ab-bool .tri { font-size: 9px; opacity: .8; }
+  .bic { width: 17px; height: 17px; display: block; flex: none; }
+  /* ツールバーは横スクロールのため overflow を切っている。
+     その中に置くと下に開いたメニューが切り取られるので、画面基準(fixed)で出す。 */
+  #bool-menu {
+    display: none; position: fixed; z-index: 60;
+    min-width: 210px; padding: 6px; flex-direction: column; gap: 2px;
+    background: #1f2430; border: 1px solid #4b5563; border-radius: 10px;
+    box-shadow: 0 10px 28px rgba(0,0,0,.5);
+  }
+  #bool-menu.show { display: flex; }
+  #bool-menu button {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    background: none; border: none; border-radius: 7px;
+    padding: 7px 10px; text-align: left; color: #e5e7eb; font-size: 13px; cursor: pointer;
+  }
+  #bool-menu button:hover { background: #374151; }
+  #bool-menu .bic { width: 20px; height: 20px; }
+  #bool-menu .bl { flex: none; }
+  #bool-menu .bh { margin-left: auto; font-size: 11px; color: #9ca3af; }
   #action-bar button.danger { border-color: #ef4444; color: #fca5a5; }
   #action-bar input { width: 40px; padding: 3px 4px; border-radius: 4px; border: 1px solid #4b5563; }
   #action-bar .grp { display: flex; align-items: center; gap: 3px; }
@@ -135,9 +159,30 @@
   .look-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
   .look-row .lbl { width: 62px; color: #4b5563; flex: none; }
   .look-row input[type=range] { flex: 1; }
+  /* 色はパレットから選ぶ。パレットに無い色は右端の「自由な色」から */
+  .look-pal { align-items: flex-start; }
+  .look-pal .lbl2 { width: 26px; flex: none; color: #4b5563; padding-top: 2px; }
+  /* 6列ずつそろえて並べる（幅なりに折り返すと 9個＋2個 になって不揃いに見えるため） */
+  .look-pal .chips { display: grid; grid-template-columns: repeat(6, 20px); gap: 4px;
+    flex: none; justify-items: center; }
+  .look-pal .chips .chip { width: 16px; height: 16px; border-radius: 50%; padding: 0;
+    border: 1px solid rgba(0,0,0,.2); cursor: pointer; }
+  .look-pal .chips .chip:hover { transform: scale(1.25); }
+  .look-pal .chips .chip.on { outline: 2px solid #2563eb; outline-offset: 1px; }
+  .look-pal .freec { display: inline-flex; flex: none; }
+  .look-pal .freec input[type=color] { width: 22px; height: 20px; padding: 0; border: 1px solid #d1d5db;
+    border-radius: 5px; background: none; cursor: pointer; }
+  /* 不透明度・濃さは上下ボタンで上げ下げ（長押しで連続） */
+  .stepper { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+  .stepper button { width: 22px; height: 20px; padding: 0; line-height: 1; font-size: 10px;
+    border: 1px solid #d1d5db; border-radius: 5px; background: #f9fafb; color: #374151; cursor: pointer; }
+  .stepper button:hover { background: #e5e7eb; }
+  .stepper button:disabled { opacity: .35; cursor: default; }
+  .stepper .val { width: 40px; text-align: right; font-variant-numeric: tabular-nums; color: #111827; }
   .look-row .sw { display: flex; align-items: center; gap: 4px; color: #4b5563; }
   .look-row .sw input[type=color] { width: 34px; height: 26px; padding: 0; border: 1px solid #d1d5db;
     border-radius: 5px; background: none; cursor: pointer; }
+  #look-nofill.on { background: #111827; color: #fff; border-color: #111827; }
   #look-nofill { font-size: 11px; padding: 4px 7px; border: 1px solid #d1d5db; border-radius: 5px;
     background: #f3f4f6; cursor: pointer; margin-left: auto; }
   #look-none { font-size: 11px; color: #9ca3af; }
@@ -295,6 +340,29 @@
   #context-menu .cm-colors .chip { width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(255,255,255,.4); cursor: pointer; padding: 0; }
   #context-menu .cm-colors .chip:hover { transform: scale(1.2); }
   #context-menu .cm-sep { height: 1px; background: #4b5563; margin: 4px 0; }
+  /* 布パーツの色まわり。サイドバーの「色と不透明度」と同じ作り */
+  #context-menu .cm-pal { display: flex; align-items: flex-start; gap: 8px; padding: 3px 10px; }
+  #context-menu .cm-pal .lbl2 { width: 26px; flex: none; font-size: 11px; color: #cbd5e1; padding-top: 2px; }
+  /* 列の幅は固定にする。1fr だと丸が列からはみ出して、右端が「なし」の下に潜り込む */
+  #context-menu .cm-pal .chips { display: grid; grid-template-columns: repeat(6, 18px); gap: 4px 4px;
+    flex: none; justify-items: center; }
+  #context-menu .cm-pal .chip { width: 16px; height: 16px; border-radius: 50%; padding: 0;
+    border: 1px solid rgba(255,255,255,.35); cursor: pointer; }
+  #context-menu .cm-pal .chip:hover { transform: scale(1.2); }
+  #context-menu .cm-pal .chip.on { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  /* メニューの button は既定で「幅いっぱいのブロック」なので、ここで打ち消す。
+     打ち消さないと横いっぱいに広がって、塗りの色が隠れてしまう。 */
+  #context-menu .cm-nofill { display: inline-block; width: auto; flex: none; text-align: center;
+    font-size: 10px; padding: 3px 6px; border: 1px solid #4b5563;
+    border-radius: 5px; background: #374151; color: #e5e7eb; cursor: pointer; }
+  #context-menu .cm-nofill.on { background: #f9fafb; color: #111827; border-color: #f9fafb; }
+  #context-menu .cm-step { display: flex; align-items: center; gap: 6px; padding: 3px 10px; font-size: 11px; color: #cbd5e1; }
+  #context-menu .cm-step .sp { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+  #context-menu .cm-step button { width: 22px; height: 20px; padding: 0; font-size: 10px; line-height: 1;
+    border: 1px solid #4b5563; border-radius: 5px; background: #374151; color: #e5e7eb; cursor: pointer; }
+  #context-menu .cm-step button:hover:not(:disabled) { background: #4b5563; }
+  #context-menu .cm-step button:disabled { opacity: .35; cursor: default; }
+  #context-menu .cm-step .val { width: 38px; text-align: right; font-variant-numeric: tabular-nums; color: #f9fafb; }
   #context-menu .cm-row { display: flex; align-items: center; gap: 6px; padding: 5px 10px; font-size: 12px; color: #e5e7eb; }
   #context-menu .cm-row input[type=number] { width: 56px; background: #111827; color: #f9fafb; border: 1px solid #4b5563;
     border-radius: 4px; padding: 3px 5px; font-size: 12px; }
@@ -322,6 +390,21 @@
   .sd-row select { border:1px solid #d1d5db; border-radius:5px; padding:4px 6px; font-size:13px; }
   .sd-row input[type=range] { flex:1; }
   .sd-row .sd-v { font-size:12px; color:#6b7280; }
+  /* 色はパレットから選ぶ（サイドバー・右クリックと同じ作り） */
+  .sd-pal { align-items:flex-start; }
+  .sd-pal > span:first-child { padding-top:3px; }
+  /* 設定は幅に余裕があるので11色を1列に。幅は固定（1fr だと丸が列からはみ出す） */
+  .sd-pal .chips { display:grid; grid-template-columns:repeat(11,20px); gap:4px; flex:none; justify-items:center; }
+  .sd-pal .chips .chip { width:18px; height:18px; border-radius:50%; padding:0;
+    border:1px solid rgba(0,0,0,.2); cursor:pointer; }
+  .sd-pal .chips .chip:hover { transform:scale(1.2); }
+  .sd-pal .chips .chip.on { outline:2px solid #2563eb; outline-offset:1px; }
+  .sd-pal .freec { display:inline-flex; flex:none; }
+  .sd-pal .freec input[type=color] { width:26px; height:22px; }
+  #sd-nofill { flex:none; font-size:11px; padding:4px 7px; border:1px solid #d1d5db; border-radius:5px;
+    background:#f9fafb; color:#374151; cursor:pointer; }
+  #sd-nofill.on { background:#111827; color:#fff; border-color:#111827; }
+  .sd-row .stepper { margin-left:0; }
   .sd-chk { display:flex; align-items:center; gap:5px; font-size:12px; color:#4b5563; cursor:pointer; }
   .sd-reset { margin-top:16px; width:100%; padding:8px; font-size:12px; border:1px solid #d1d5db;
     border-radius:6px; background:#f3f4f6; cursor:pointer; }
@@ -529,9 +612,40 @@
       <button id="ab-fliph" title="左右反転">⇋</button>
       <button id="ab-flipv" title="上下反転">⇅</button>
       <span class="sep" id="ab-bool-sep"></span>
-      <button id="ab-sub" title="切り抜く：上のパーツの形で、下のパーツを切り抜きます">⊖</button>
-      <button id="ab-and" title="重なった所だけ残す">⊗</button>
-      <button id="ab-or" title="2つを1枚につなげる">⊕</button>
+      <span class="bool-wrap" id="ab-bool-wrap">
+        <button id="ab-bool" title="パーツの合体：布のパーツを2枚選んでから、やり方を選びます">
+          <svg viewBox="0 0 22 22" class="bic"><g fill="currentColor">
+            <rect x="2" y="2" width="12" height="12" rx="1.5"/>
+            <circle cx="15" cy="15" r="6"/>
+            <circle cx="15" cy="15" r="6" fill="none" stroke="#111827" stroke-width="1.6"/>
+          </g></svg><span class="tri">▾</span>
+        </button>
+        <div id="bool-menu">
+          <button data-bool="or"><svg viewBox="0 0 22 22" class="bic"><g fill="currentColor">
+              <rect x="2" y="2" width="12" height="12" rx="1.5"/><circle cx="15" cy="15" r="6"/>
+            </g></svg><span class="bl">追加</span><span class="bh">2枚を1枚につなげる</span></button>
+          <button data-bool="sub"><svg viewBox="0 0 22 22" class="bic">
+              <mask id="mk-sub"><rect x="0" y="0" width="22" height="22" fill="#fff"/><circle cx="15" cy="15" r="6" fill="#000"/></mask>
+              <rect x="2" y="2" width="12" height="12" rx="1.5" fill="currentColor" mask="url(#mk-sub)"/>
+              <circle cx="15" cy="15" r="6" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".45"/>
+            </svg><span class="bl">型抜き</span><span class="bh">上の形で下を抜く</span></button>
+          <button data-bool="and"><svg viewBox="0 0 22 22" class="bic">
+              <mask id="mk-and"><rect x="2" y="2" width="12" height="12" rx="1.5" fill="#fff"/></mask>
+              <circle cx="15" cy="15" r="6" fill="currentColor" mask="url(#mk-and)"/>
+              <rect x="2" y="2" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".45"/>
+              <circle cx="15" cy="15" r="6" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".45"/>
+            </svg><span class="bl">交差</span><span class="bh">重なった所だけ残す</span></button>
+          <button data-bool="xor"><svg viewBox="0 0 22 22" class="bic">
+              <path fill="currentColor" fill-rule="evenodd"
+                d="M2 3.5A1.5 1.5 0 013.5 2h9A1.5 1.5 0 0114 3.5v9a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 12.5zM21 15a6 6 0 11-12 0 6 6 0 0112 0z"/>
+            </svg><span class="bl">中マド</span><span class="bh">重なった所を穴にする</span></button>
+          <button data-bool="div"><svg viewBox="0 0 22 22" class="bic">
+              <rect x="2" y="2" width="12" height="12" rx="1.5" fill="currentColor" opacity=".55"/>
+              <circle cx="15" cy="15" r="6" fill="currentColor" opacity=".55"/>
+              <path d="M14 9.4V14H9.4" fill="none" stroke="#111827" stroke-width="1.6"/>
+            </svg><span class="bl">除算</span><span class="bh">重なりで全部に分ける</span></button>
+        </div>
+      </span>
       <button id="ab-group" title="グループ化">🔗</button>
       <button id="ab-ungroup" title="グループ解除">⛓</button>
       <button id="ab-del" class="danger" title="削除">🗑</button>
@@ -606,10 +720,19 @@
       すでに描いてあるものは変わりません。</p>
 
       <h3>パーツ</h3>
-      <div class="sd-row"><span>線の色</span><input type="color" id="sd-stroke"></div>
-      <div class="sd-row"><span>塗りの色</span><input type="color" id="sd-fill">
-        <label class="sd-chk"><input type="checkbox" id="sd-nofill"> 塗りなし</label></div>
-      <div class="sd-row"><span>塗りの濃さ</span><input type="range" id="sd-fop" min="0" max="100"><span id="sd-fop-v" class="sd-v"></span></div>
+      <div class="sd-row sd-pal"><span>線の色</span>
+        <span class="chips" id="sd-pal-stroke"></span>
+        <label class="freec" title="パレットに無い色を選ぶ"><input type="color" id="sd-stroke"></label></div>
+      <div class="sd-row sd-pal"><span>塗りの色</span>
+        <span class="chips" id="sd-pal-fill"></span>
+        <label class="freec" title="パレットに無い色を選ぶ"><input type="color" id="sd-fill"></label>
+        <button type="button" id="sd-nofill" title="塗りをなくす／もどす">なし</button></div>
+      <div class="sd-row"><span>塗りの濃さ</span>
+        <span class="stepper">
+          <button type="button" data-sdstep="fop" data-dir="-1" title="下げる（長押しで続けて）">▼</button>
+          <span class="val" id="sd-fop-v"></span>
+          <button type="button" data-sdstep="fop" data-dir="1" title="上げる（長押しで続けて）">▲</button>
+        </span></div>
       <div class="sd-row"><span>線の太さ</span><input type="number" id="sd-lw" min="0.5" max="20" step="0.5"><span class="sd-v">px</span></div>
 
       <h3>文字</h3>
@@ -621,7 +744,9 @@
           <option value="mono">等幅</option>
         </select></div>
       <div class="sd-row"><span>大きさ</span><input type="number" id="sd-tsize" min="4" step="1"><span class="sd-v">mm</span></div>
-      <div class="sd-row"><span>色</span><input type="color" id="sd-tcolor"></div>
+      <div class="sd-row sd-pal"><span>色</span>
+        <span class="chips" id="sd-pal-tcolor"></span>
+        <label class="freec" title="パレットに無い色を選ぶ"><input type="color" id="sd-tcolor"></label></div>
       <div class="sd-row"><span></span>
         <label class="sd-chk"><input type="checkbox" id="sd-tbold"> 太字</label>
         <label class="sd-chk"><input type="checkbox" id="sd-tvert"> 縦書き</label></div>
@@ -1018,20 +1143,32 @@
     <div id="sidebar">
       <div id="look-panel">
         <h2>色と不透明度</h2>
-        <div class="look-row">
-          <label class="sw"><span>線</span><input type="color" id="look-stroke" value="#111827"></label>
-          <label class="sw"><span>塗り</span><input type="color" id="look-fill" value="#2563eb"></label>
-          <button id="look-nofill" title="塗りをなくす">塗りなし</button>
+        <div class="look-row look-pal">
+          <span class="lbl2">線</span>
+          <span class="chips" id="pal-stroke"></span>
+          <label class="freec" title="パレットに無い色を選ぶ"><input type="color" id="look-stroke" value="#111827"></label>
+        </div>
+        <div class="look-row look-pal">
+          <span class="lbl2">塗り</span>
+          <span class="chips" id="pal-fill"></span>
+          <label class="freec" title="パレットに無い色を選ぶ"><input type="color" id="look-fill" value="#2563eb"></label>
+          <button id="look-nofill" title="塗りをなくす／もどす">なし</button>
         </div>
         <div class="look-row">
           <span class="lbl">不透明度</span>
-          <input type="range" id="look-op" min="0" max="100" value="100">
-          <span id="look-op-v">100%</span>
+          <span class="stepper">
+            <button class="dn" data-step="look-op" data-dir="-1" title="下げる（長押しで続けて）">▼</button>
+            <span class="val" id="look-op-v">100%</span>
+            <button class="up" data-step="look-op" data-dir="1" title="上げる（長押しで続けて）">▲</button>
+          </span>
         </div>
         <div class="look-row">
           <span class="lbl">塗りの濃さ</span>
-          <input type="range" id="look-fop" min="0" max="100" value="4">
-          <span id="look-fop-v">4%</span>
+          <span class="stepper">
+            <button class="dn" data-step="look-fop" data-dir="-1" title="下げる（長押しで続けて）">▼</button>
+            <span class="val" id="look-fop-v">4%</span>
+            <button class="up" data-step="look-fop" data-dir="1" title="上げる（長押しで続けて）">▲</button>
+          </span>
         </div>
         <div id="look-none">パーツを選ぶと変えられます</div>
       </div>
@@ -2006,13 +2143,28 @@ function booleanSelection(op){
     }
   }
 
-  let rings;
-  try { rings = ringBoolean(A, B, op); }
+  // 中マド＝重なった所を除く（A−B と B−A）。除算＝それに重なりも足して、全部バラす。
+  // まとめて1つの輪の集まりにせず「かたまり」ごとに分けておく。
+  // 混ぜると、隣り合う破片を穴と取りちがえてしまう。
+  let groups;
+  try {
+    if (op === "xor" || op === "div"){
+      // 重なりが無いと、どちらも「何も変わらない」ので先に断る。
+      // 面積の合計で見分けようとすると、穴のぶんも足されて判定を誤る。
+      const inter = ringBoolean(A, B, "and");
+      if (!inter.length){ toast("2つのパーツが重なっていません"); return; }
+      groups = [ringBoolean(A,B,"sub"), ringBoolean(B,A,"sub")];
+      if (op === "div") groups.push(inter);
+    }
+    else groups = [ringBoolean(A, B, op)];
+  }
   catch(err){ toast("この形では計算できませんでした"); return; }
+  groups = groups.filter(g=>g && g.length);
+  const rings = [].concat(...groups);
 
   if (!rings.length){
     toast(op==="and" ? "重なっている所がありません"
-        : op==="sub" ? "同じ形どうしなので、何も残りません"
+        : (op==="sub"||op==="xor"||op==="div") ? "同じ形どうしなので、何も残りません"
         : "計算できませんでした");
     return;
   }
@@ -2027,15 +2179,19 @@ function booleanSelection(op){
   // 点は間引かず、細かいままベジェ曲線を当てはめる（そのほうが少ない点で正確になる）。
   // 0.15mm はズレの上限。布を裁つ精度から見れば十分すぎる細かさ。
   const FIT_TOL = 0.15;
-  // 大きい輪が外側、その中に入っている輪は「穴」
-  const withArea = rings.map(r=>({ r, a: Math.abs(ringArea(r)) })).sort((x,y)=>y.a-x.a);
-  const outer = withArea[0].r;
-  const isHole = (r)=> pointInRing(r[0], outer) && r !== outer;
-
   // 外側の輪＝パーツの形、その中に入っている輪＝そのパーツの「穴」。
   // 穴を別のパーツにすると、パーツを動かした時に置き去りになるので、パーツ自身に持たせる。
-  const outers = withArea.filter(w=>!isHole(w.r));
-  const holeRings = withArea.filter(w=>isHole(w.r)).map(w=>ringToNodes(ringCCW(w.r), FIT_TOL));
+  // かたまりごとに「一番大きい輪が外側」と見るので、別のかたまりの破片を穴と誤らない。
+  const outers = [], holeRings = [];
+  for (const g of groups){
+    const wa = g.map(r=>({ r, a: Math.abs(ringArea(r)) })).sort((x,y)=>y.a-x.a);
+    const outer = wa[0].r;
+    for (const w of wa){
+      if (w.r !== outer && pointInRing(w.r[0], outer)) holeRings.push(ringToNodes(ringCCW(w.r), FIT_TOL));
+      else outers.push(w);
+    }
+  }
+  outers.sort((x,y)=>y.a-x.a);
   const at = project.parts.indexOf(base);
   const made = [];
   const stSegs = captureStitchEdges(base);   // 部分ステッチの辺を控える（輪郭が作り直されるため）
@@ -2088,10 +2244,14 @@ function booleanSelection(op){
   const holes = holeRings.length;
   const pieces = made.length;
   const swapNote = swapped ? "（大きいほうから小さいほうを抜きました）" : "";
-  toast(op!=="sub" ? (op==="and" ? "重なった所を残しました" : "合体しました")
-      : holes ? `穴を${holes}個あけました${swapNote}`
-      : pieces>1 ? `切り抜いた結果、${pieces}枚に分かれました`
-      : `切り抜きました${swapNote}`);
+  const holeNote = holes ? `／穴${holes}個` : "";
+  toast(op==="or"  ? "追加しました（1枚になりました）"
+      : op==="and" ? "交差：重なった所を残しました"
+      : op==="xor" ? `中マド：${pieces}枚になりました${holeNote}`
+      : op==="div" ? `除算：${pieces}枚に分けました${holeNote}`
+      : holes ? `型抜き：穴を${holes}個あけました${swapNote}`
+      : pieces>1 ? `型抜き：${pieces}枚に分かれました`
+      : `型抜きしました${swapNote}`);
 }
 
 // ===== ナイフ：輪郭の2点を結ぶ線でパーツを切り分ける =====
@@ -3808,6 +3968,7 @@ function insertNodeOnSegment(part, i, t, hole){
   if (!nodes) return false;
   const closed = (hole===undefined || hole===null) ? part.closed : true;
   const n = nodes.length;
+  if (!(i >= 0 && i < n)) return false;             // 点が減って番号が無くなっている
   const j = (i+1) % n;
   if (j===0 && !closed) return false;               // 開いた線の終端の先は無い
   const sc = segControls(nodes, i, closed);
@@ -4071,8 +4232,9 @@ function updateActionBar(){
   document.getElementById("ab-ungroup").style.display = anyGrouped ? "" : "none";
   // 切り抜きなどは「布のパーツを2枚」選んでいるときに出す
   const canBool = boolReady();
-  for (const id of ["ab-bool-sep","ab-sub","ab-and","ab-or"])
+  for (const id of ["ab-bool-sep","ab-bool-wrap"])
     document.getElementById(id).style.display = canBool ? "" : "none";
+  if (!canBool && typeof closeBoolMenu==="function") closeBoolMenu();
 }
 
 function renderShapePreview(){
@@ -4704,25 +4866,60 @@ function lookTargets(){
   if (selectedPartId) ids.add(selectedPartId);
   return [...ids].map(id=>project.parts.find(p=>p.id===id)).filter(p=>p && !p.kind);
 }
+// 線・塗りのパレット。中身は COLORS（図形の右クリックと同じ並び）
+function buildLookPalettes(){
+  for (const [boxId, kind] of [["pal-stroke","stroke"],["pal-fill","fill"]]){
+    document.getElementById(boxId).innerHTML = COLORS.map(c=>
+      `<button class="chip" data-look="${kind}" data-color="${c}" title="${c}" style="background:${c}"></button>`).join("");
+  }
+}
+// いま選んでいるパーツの色に、パレットの印を合わせる
+function markPalette(boxId, cur){
+  for (const b of document.getElementById(boxId).children)
+    b.classList.toggle("on", (b.dataset.color||"").toLowerCase() === String(cur||"").toLowerCase());
+}
+// 不透明度・濃さの上下ボタン。5%きざみで、きりのいい数に合わせる
+const LOOK_STEP = 5;
+// いまの値から、きりのいい5%きざみで1つ上／下へ
+function stepValue(cur, dir){
+  const v = (dir > 0) ? (Math.floor(cur/LOOK_STEP)+1)*LOOK_STEP : (Math.ceil(cur/LOOK_STEP)-1)*LOOK_STEP;
+  return Math.max(0, Math.min(100, v));
+}
+function stepLook(which, dir){
+  const t = lookTargets(); if (!t.length) return;
+  const key = (which==="look-op") ? "opacity" : "fillOpacity";
+  const p0 = t[0]; normalizeLook(p0);
+  const cur = p0[key];
+  const v = stepValue(cur, dir);
+  if (v === cur) return;
+  applyLook(p=>{ p[key] = v; });
+  renderLookPanel();
+}
 function renderLookPanel(){
   const t = lookTargets();
   const on = t.length > 0;
   document.getElementById("look-none").style.display = on ? "none" : "block";
-  ["look-stroke","look-fill","look-op","look-fop","look-nofill"].forEach(id=>{
+  ["look-stroke","look-fill","look-nofill"].forEach(id=>{
     document.getElementById(id).disabled = !on;
     document.getElementById(id).style.opacity = on ? 1 : .4;
   });
-  if (!on) return;
+  for (const b of document.querySelectorAll("#look-panel .chip, .stepper button")) b.disabled = !on;
+  if (!on){
+    markPalette("pal-stroke", null); markPalette("pal-fill", null);
+    return;
+  }
   const p = t[0]; normalizeLook(p);
   if (document.activeElement.id !== "look-stroke") document.getElementById("look-stroke").value = p.stroke;
   if (document.activeElement.id !== "look-fill" && p.fill!=="none") document.getElementById("look-fill").value = p.fill;
-  if (document.activeElement.id !== "look-op"){
-    document.getElementById("look-op").value = p.opacity;
-    document.getElementById("look-op-v").textContent = p.opacity + "%";
-  }
-  if (document.activeElement.id !== "look-fop"){
-    document.getElementById("look-fop").value = p.fillOpacity;
-    document.getElementById("look-fop-v").textContent = p.fillOpacity + "%";
+  markPalette("pal-stroke", p.stroke);
+  markPalette("pal-fill", p.fill==="none" ? null : p.fill);
+  document.getElementById("look-op-v").textContent  = p.opacity + "%";
+  document.getElementById("look-fop-v").textContent = p.fillOpacity + "%";
+  document.getElementById("look-nofill").classList.toggle("on", p.fill==="none");
+  // 端まで行ったら、その向きのボタンは押せなくする
+  for (const b of document.querySelectorAll(".stepper button")){
+    const v = (b.dataset.step==="look-op") ? p.opacity : p.fillOpacity;
+    b.disabled = (+b.dataset.dir > 0) ? v >= 100 : v <= 0;
   }
 }
 function applyLook(fn, once){
@@ -4732,21 +4929,63 @@ function applyLook(fn, once){
   saveLocal(); renderThrottled();
 }
 document.getElementById("look-stroke").addEventListener("mousedown", ()=>pushUndo());
-document.getElementById("look-stroke").addEventListener("input", (e)=>applyLook(p=>{ p.stroke = e.target.value; }));
+document.getElementById("look-stroke").addEventListener("input", (e)=>{
+  applyLook(p=>{ p.stroke = e.target.value; });
+  markPalette("pal-stroke", e.target.value);      // パレット外の色ならどれにも印が付かない
+});
 document.getElementById("look-fill").addEventListener("mousedown", ()=>pushUndo());
-document.getElementById("look-fill").addEventListener("input", (e)=>applyLook(p=>{ p.fill = e.target.value; }));
-document.getElementById("look-nofill").addEventListener("click", ()=>applyLook(p=>{
-  p.fill = (p.fill==="none") ? (p.stroke||DEFAULT_COLOR) : "none"; }, true));
-document.getElementById("look-op").addEventListener("mousedown", ()=>pushUndo());
-document.getElementById("look-op").addEventListener("input", (e)=>{
-  document.getElementById("look-op-v").textContent = e.target.value + "%";
-  applyLook(p=>{ p.opacity = parseInt(e.target.value,10); });
+document.getElementById("look-fill").addEventListener("input", (e)=>{
+  applyLook(p=>{ p.fill = e.target.value; });
+  markPalette("pal-fill", e.target.value);
+  document.getElementById("look-nofill").classList.remove("on");
 });
-document.getElementById("look-fop").addEventListener("mousedown", ()=>pushUndo());
-document.getElementById("look-fop").addEventListener("input", (e)=>{
-  document.getElementById("look-fop-v").textContent = e.target.value + "%";
-  applyLook(p=>{ p.fillOpacity = parseInt(e.target.value,10); });
+// 塗りなし ⇔ 元の色。消す前の色を覚えておき、戻すときはその色に戻す
+// （覚えないと、戻した時に線の色になってしまい、塗り分けが消える）
+document.getElementById("look-nofill").addEventListener("click", ()=>{
+  applyLook(p=>{
+    if (p.fill === "none") p.fill = p.fillWas || p.stroke || DEFAULT_COLOR;
+    else { p.fillWas = p.fill; p.fill = "none"; }
+  }, true);
+  renderLookPanel();
 });
+buildLookPalettes();
+// パレットのチップを押したら、その色にする
+document.getElementById("look-panel").addEventListener("click", (e)=>{
+  const chip = e.target.closest(".chip[data-look]");
+  if (!chip || chip.disabled) return;
+  const c = chip.dataset.color;
+  if (chip.dataset.look === "stroke"){
+    applyLook(p=>{ p.stroke = c; }, true);
+    document.getElementById("look-stroke").value = c;
+  } else {
+    applyLook(p=>{ p.fill = c; }, true);
+    document.getElementById("look-fill").value = c;
+  }
+  renderLookPanel();
+});
+// 上下ボタン。押しっぱなしで続けて動く（0〜100まで手が疲れないように）
+(function(){
+  let delayId = null, repeatId = null;
+  const stop = ()=>{
+    if (delayId){ clearTimeout(delayId); delayId = null; }
+    if (repeatId){ clearInterval(repeatId); repeatId = null; }
+  };
+  document.getElementById("look-panel").addEventListener("mousedown", (e)=>{
+    const b = e.target.closest(".stepper button");
+    if (!b || b.disabled) return;
+    e.preventDefault();
+    stop();
+    pushUndo();                                   // 押している間ぜんぶで1回ぶんの取り消し
+    const go = ()=>{
+      if (b.disabled){ stop(); return; }          // 端まで来たら止める
+      stepLook(b.dataset.step, +b.dataset.dir);
+    };
+    go();
+    delayId = setTimeout(()=>{ delayId = null; repeatId = setInterval(go, 70); }, 350);
+  });
+  window.addEventListener("mouseup", stop);
+  window.addEventListener("blur", stop);
+})();
 
 // レイヤーとパーツをひとつの階層で見せる（Affinityのレイヤーパネルと同じ並び）
 function renderPartList(){
@@ -5070,6 +5309,8 @@ function filletNode(part, idx, radius, hole){
   if (!nodes) return false;
   const n = nodes.length, closed = (hole===undefined) ? part.closed : true;   // 穴の輪はいつも閉じている
   if (n < 3) return false;
+  // 選んだあとに点が減ると、覚えている番号が無くなる（スライダーを動かすたびに使うため）
+  if (!(idx >= 0 && idx < n)) return false;
   if (!closed && (idx===0 || idx===n-1)) return false; // endpoints of an open path have one edge
   if (!(radius > 0)) return false;
   const iPrev = ((idx-1)%n+n)%n, iNext = (idx+1)%n;
@@ -6117,15 +6358,6 @@ function applyMenuInput(e){
     document.getElementById("grid-size").value = g;
     saveLocal(); render(); return;
   }
-  if (e.target.id === "cm-fop"){                  // 塗りの濃さ
-    if (ctxTarget && ctxTarget.part){
-      normalizeLook(ctxTarget.part);
-      ctxTarget.part.fillOpacity = parseInt(e.target.value,10);
-      const v = document.getElementById("cm-fop-v"); if (v) v.textContent = e.target.value + "%";
-      saveLocal(); renderThrottled();
-    }
-    return;
-  }
   if (e.target.id === "cm-dim"){                  // 寸法の表示
     document.getElementById("chk-dim").checked = e.target.checked;
     saveLocal(); render(); return;
@@ -6134,6 +6366,32 @@ function applyMenuInput(e){
   ctxTarget.part.zipPitch = Math.min(20, Math.max(1, parseFloat(e.target.value)||3));
   saveLocal(); render();
 }
+// メニューの中の上下ボタン（不透明度・塗りの濃さ）。サイドバーと同じく長押しで連続
+(function(){
+  let delayId = null, repeatId = null;
+  const stop = ()=>{
+    if (delayId){ clearTimeout(delayId); delayId = null; }
+    if (repeatId){ clearInterval(repeatId); repeatId = null; }
+  };
+  document.getElementById("context-menu").addEventListener("mousedown", (e)=>{
+    const b = e.target.closest("[data-mstep]");
+    if (!b || b.disabled || !ctxTarget || !ctxTarget.part) return;
+    e.preventDefault(); e.stopPropagation();
+    stop();
+    pushUndo();                                    // 押している間ぜんぶで1回ぶんの取り消し
+    const p = ctxTarget.part, key = (b.dataset.mstep==="op") ? "opacity" : "fillOpacity";
+    const go = ()=>{
+      normalizeLook(p);
+      const v = stepValue(p[key], +b.dataset.dir);
+      if (v === p[key]){ stop(); return; }
+      p[key] = v; saveLocal(); renderThrottled(); refreshCmLook(p);
+    };
+    go();
+    delayId = setTimeout(()=>{ delayId = null; repeatId = setInterval(go, 70); }, 350);
+  });
+  window.addEventListener("mouseup", stop);
+  window.addEventListener("blur", stop);
+})();
 document.getElementById("context-menu").addEventListener("input", applyMenuInput);
 document.getElementById("context-menu").addEventListener("change", applyMenuInput);
 document.getElementById("context-menu").addEventListener("focusin", (e)=>{
@@ -6198,6 +6456,44 @@ function boolParts(){
   return solid.length === 2 ? solid : null;
 }
 function boolReady(){ return !!boolParts(); }
+// 布パーツの色まわり。サイドバーの「色と不透明度」と同じ作りにそろえる
+// （線・塗りはパレットから選ぶ／不透明度と濃さは上下ボタン）
+function cmLookHtml(part){
+  normalizeLook(part);
+  const chips = (kind, cur)=> COLORS.map(c=>
+    `<button class="chip${String(cur||"").toLowerCase()===c?' on':''}" data-look="${kind}" data-color="${c}" title="${c}" style="background:${c}"></button>`
+  ).join("");
+  const step = (key, val, label)=>`
+    <div class="cm-step"><span>${label}</span><span class="sp">
+      <button data-mstep="${key}" data-dir="-1" title="下げる"${val<=0?" disabled":""}>▼</button>
+      <span class="val" id="cm-${key}-v">${val}%</span>
+      <button data-mstep="${key}" data-dir="1" title="上げる"${val>=100?" disabled":""}>▲</button>
+    </span></div>`;
+  return `
+    <div class="cm-pal"><span class="lbl2">線</span><span class="chips" data-pal="stroke">${chips("stroke", part.stroke)}</span></div>
+    <div class="cm-pal"><span class="lbl2">塗り</span><span class="chips" data-pal="fill">${chips("fill", part.fill==="none"?null:part.fill)}</span>
+      <button class="cm-nofill${part.fill==="none"?" on":""}" data-nofill="1" title="塗りをなくす／もどす">なし</button></div>
+    ${step("op", part.opacity, "不透明度")}
+    ${step("fop", part.fillOpacity, "塗りの濃さ")}`;
+}
+// メニューを開いたまま、印と数字だけ今の値に合わせ直す
+function refreshCmLook(part){
+  const m = document.getElementById("context-menu");
+  if (!m.classList.contains("show") || !part) return;
+  normalizeLook(part);
+  for (const box of m.querySelectorAll(".cm-pal .chips")){
+    const cur = box.dataset.pal==="stroke" ? part.stroke : (part.fill==="none" ? null : part.fill);
+    for (const b of box.children)
+      b.classList.toggle("on", (b.dataset.color||"").toLowerCase() === String(cur||"").toLowerCase());
+  }
+  const nf = m.querySelector(".cm-nofill"); if (nf) nf.classList.toggle("on", part.fill==="none");
+  for (const key of ["op","fop"]){
+    const v = (key==="op") ? part.opacity : part.fillOpacity;
+    const el = m.querySelector("#cm-"+key+"-v"); if (el) el.textContent = v + "%";
+    for (const b of m.querySelectorAll('[data-mstep="'+key+'"]'))
+      b.disabled = (+b.dataset.dir > 0) ? v >= 100 : v <= 0;
+  }
+}
 function showObjectMenu(x, y, part, text){
   ctxTarget = text ? { text } : { part };
   const cur = text ? (text.color||"#111827") : ((part.stroke!==undefined?part.stroke:part.color)||"#2563eb");
@@ -6207,12 +6503,8 @@ function showObjectMenu(x, y, part, text){
   const m = document.getElementById("context-menu");
   m.innerHTML = `
     <div class="cm-title">${escapeHtml(label)}</div>
-    <div class="cm-colors">${COLORS.map(c=>`<button class="chip${cur===c?' on':''}" data-color="${c}" title="この色にする" style="background:${c}"></button>`).join("")}</div>
-    ${(part && !part.kind) ? `
-      <div class="cm-row">塗りの濃さ
-        <input type="range" id="cm-fop" min="0" max="100" value="${part.fillOpacity===undefined?4:part.fillOpacity}">
-        <span id="cm-fop-v">${part.fillOpacity===undefined?4:part.fillOpacity}%</span>
-      </div>` : ""}
+    ${(part && !part.kind) ? cmLookHtml(part)
+      : `<div class="cm-colors">${COLORS.map(c=>`<button class="chip${cur===c?' on':''}" data-color="${c}" title="この色にする" style="background:${c}"></button>`).join("")}</div>`}
     <div class="cm-sep"></div>
     ${(part && !part.kind) ? (part.symAxis!==undefined
         ? `<button data-cmd="symoff">◫ 左右対称をやめる</button>`
@@ -6232,15 +6524,34 @@ function showObjectMenu(x, y, part, text){
     ${(part && hasHoles(part)) ? `<button data-cmd="fillholes">⬜ 穴を埋める（${part.holes.length}個）</button>` : ""}
     ${boolReady() ? `
       <div class="cm-sep"></div>
-      <button data-cmd="boolsub">⊖ 切り抜く（上の形で下を抜く）</button>
-      <button data-cmd="booland">⊗ 重なった所だけ残す</button>
-      <button data-cmd="boolor">⊕ 1枚につなげる</button>` : ""}
+      <button data-cmd="boolor">⊕ 追加（1枚につなげる）</button>
+      <button data-cmd="boolsub">⊖ 型抜き（上の形で下を抜く）</button>
+      <button data-cmd="booland">⊗ 交差（重なった所だけ残す）</button>
+      <button data-cmd="boolxor">◍ 中マド（重なった所を穴にする）</button>
+      <button data-cmd="booldiv">◑ 除算（重なりで全部に分ける）</button>` : ""}
     ${part ? `<button data-cmd="dupobj">複製</button>` : ""}
     <button data-cmd="delobj">🗑 削除</button>`;
   placeMenu(m, x, y);
 }
 function hideContextMenu(){ document.getElementById("context-menu").classList.remove("show"); }
 document.getElementById("context-menu").addEventListener("click", (e)=>{
+  // 布パーツの「線／塗り」パレット。選んでも閉じない（線→塗りと続けて選べるように）
+  const lookChip = e.target.closest(".cm-pal .chip");
+  if (lookChip && ctxTarget && ctxTarget.part){
+    pushUndo();
+    const p = ctxTarget.part; normalizeLook(p);
+    const c = lookChip.dataset.color;
+    if (lookChip.dataset.look === "stroke"){ p.stroke = c; p.color = c; }
+    else { p.fill = c; }
+    saveLocal(); render(); refreshCmLook(p); return;
+  }
+  if (e.target.closest(".cm-nofill") && ctxTarget && ctxTarget.part){
+    pushUndo();
+    const p = ctxTarget.part; normalizeLook(p);
+    if (p.fill === "none") p.fill = p.fillWas || p.stroke || DEFAULT_COLOR;
+    else { p.fillWas = p.fill; p.fill = "none"; }
+    saveLocal(); render(); refreshCmLook(p); return;
+  }
   // colour chip inside the object menu
   if (e.target.classList.contains("chip") && ctxTarget){
     pushUndo();
@@ -6285,6 +6596,8 @@ document.getElementById("context-menu").addEventListener("click", (e)=>{
   else if (cmd==="boolsub"){ booleanSelection("sub"); }
   else if (cmd==="booland"){ booleanSelection("and"); }
   else if (cmd==="boolor"){ booleanSelection("or"); }
+  else if (cmd==="boolxor"){ booleanSelection("xor"); }
+  else if (cmd==="booldiv"){ booleanSelection("div"); }
   else if (cmd==="delmeasone" && ctxTarget){
     pushUndo();
     const id = ctxTarget.text ? ctxTarget.text.id : ctxTarget.part.id;
@@ -7023,13 +7336,35 @@ function loadSettings(){
   set("grid-size", v.grid); set("stitch-mm", v.stitch); set("zip-pitch", v.zip); set("fillet-r", v.fillet);
   const fs = document.getElementById("fillet-slider"); if (fs && v.fillet!==undefined) fs.value = v.fillet;
 }
+// 設定の色は3か所ともパレットから選ぶ（サイドバー・右クリックと同じ並び）
+function buildSetPalettes(){
+  for (const id of ["sd-pal-stroke","sd-pal-fill","sd-pal-tcolor"]){
+    const box = document.getElementById(id); if (!box) return;
+    box.innerHTML = COLORS.map(c=>
+      `<button type="button" class="chip" data-color="${c}" title="${c}" style="background:${c}"></button>`).join("");
+  }
+}
+function markSetPalette(id, cur){
+  const box = document.getElementById(id); if (!box) return;
+  for (const b of box.children)
+    b.classList.toggle("on", (b.dataset.color||"").toLowerCase() === String(cur||"").toLowerCase());
+}
+// いまの設定値を、パレットの印と数字に映す
+function syncSettingsLook(){
+  const g = (id)=>document.getElementById(id);
+  const noFill = (newFillColor === "none");
+  markSetPalette("sd-pal-stroke", newPartColor);
+  markSetPalette("sd-pal-fill", noFill ? null : (newFillColor || newPartColor));
+  markSetPalette("sd-pal-tcolor", g("text-color").value);
+  g("sd-nofill").classList.toggle("on", noFill);
+  g("sd-fop-v").textContent = newFillOpacity + "%";
+  for (const b of document.querySelectorAll("[data-sdstep]"))
+    b.disabled = (+b.dataset.dir > 0) ? newFillOpacity >= 100 : newFillOpacity <= 0;
+}
 function openSettings(){
   const g = (id)=>document.getElementById(id);
   g("sd-stroke").value = newPartColor;
-  g("sd-nofill").checked = (newFillColor === "none");
   g("sd-fill").value = (newFillColor && newFillColor!=="none") ? newFillColor : newPartColor;
-  g("sd-fill").disabled = g("sd-nofill").checked;
-  g("sd-fop").value = newFillOpacity; g("sd-fop-v").textContent = newFillOpacity + "%";
   g("sd-lw").value = newLineWidth;
   g("sd-font").value = g("text-font").value;
   g("sd-tsize").value = g("text-size").value;
@@ -7040,6 +7375,7 @@ function openSettings(){
   g("sd-stitch").value = g("stitch-mm").value;
   g("sd-zip").value = g("zip-pitch").value;
   g("sd-fillet").value = g("fillet-r").value;
+  buildSetPalettes(); syncSettingsLook();
   g("set-back").classList.add("show"); g("set-dlg").classList.add("show");
 }
 function closeSettings(){
@@ -7052,16 +7388,12 @@ document.getElementById("set-back").addEventListener("click", closeSettings);
 document.getElementById("set-dlg").addEventListener("input", (e)=>{
   const g = (id)=>document.getElementById(id);
   switch (e.target.id){
-    case "sd-stroke": newPartColor = e.target.value; renderNewColors(); break;
-    case "sd-fill":   newFillColor = e.target.value; break;
-    case "sd-nofill": newFillColor = e.target.checked ? "none" : g("sd-fill").value;
-                      g("sd-fill").disabled = e.target.checked; break;
-    case "sd-fop":    newFillOpacity = parseInt(e.target.value,10);
-                      g("sd-fop-v").textContent = newFillOpacity + "%"; break;
+    case "sd-stroke": newPartColor = e.target.value; renderNewColors(); syncSettingsLook(); break;
+    case "sd-fill":   newFillColor = e.target.value; syncSettingsLook(); break;
     case "sd-lw":     newLineWidth = Math.max(0.5, parseFloat(e.target.value)||2); break;
     case "sd-font":   g("text-font").value = e.target.value; break;
     case "sd-tsize":  g("text-size").value = e.target.value; break;
-    case "sd-tcolor": g("text-color").value = e.target.value; break;
+    case "sd-tcolor": g("text-color").value = e.target.value; syncSettingsLook(); break;
     case "sd-tbold":  g("text-bold").checked = e.target.checked; break;
     case "sd-tvert":  g("text-vertical").checked = e.target.checked; break;
     case "sd-grid":   g("grid-size").value = e.target.value; render(); break;
@@ -7077,6 +7409,45 @@ document.getElementById("set-dlg").addEventListener("change", (e)=>{
   if (e.target.type==="checkbox" || e.target.tagName==="SELECT")
     document.getElementById("set-dlg").dispatchEvent(new Event("input"));
 });
+// 設定のパレット・「なし」ボタン
+document.getElementById("set-dlg").addEventListener("click", (e)=>{
+  const g = (id)=>document.getElementById(id);
+  const chip = e.target.closest(".sd-pal .chip");
+  if (chip){
+    const c = chip.dataset.color, box = chip.parentElement.id;
+    if (box === "sd-pal-stroke"){ newPartColor = c; g("sd-stroke").value = c; renderNewColors(); }
+    else if (box === "sd-pal-fill"){ newFillColor = c; g("sd-fill").value = c; }
+    else { g("text-color").value = c; g("sd-tcolor").value = c; }
+    syncSettingsLook(); saveSettings(); return;
+  }
+  if (e.target.closest("#sd-nofill")){
+    newFillColor = (newFillColor === "none") ? g("sd-fill").value : "none";
+    syncSettingsLook(); saveSettings(); return;
+  }
+});
+// 設定の上下ボタン（塗りの濃さ）。長押しで連続
+(function(){
+  let delayId = null, repeatId = null;
+  const stop = ()=>{
+    if (delayId){ clearTimeout(delayId); delayId = null; }
+    if (repeatId){ clearInterval(repeatId); repeatId = null; }
+  };
+  document.getElementById("set-dlg").addEventListener("mousedown", (e)=>{
+    const b = e.target.closest("[data-sdstep]");
+    if (!b || b.disabled) return;
+    e.preventDefault();
+    stop();
+    const go = ()=>{
+      const v = stepValue(newFillOpacity, +b.dataset.dir);
+      if (v === newFillOpacity){ stop(); return; }
+      newFillOpacity = v; syncSettingsLook(); saveSettings();
+    };
+    go();
+    delayId = setTimeout(()=>{ delayId = null; repeatId = setInterval(go, 70); }, 350);
+  });
+  window.addEventListener("mouseup", stop);
+  window.addEventListener("blur", stop);
+})();
 document.getElementById("sd-reset").addEventListener("click", ()=>{
   try { localStorage.removeItem(SET_KEY); } catch(_){}
   newPartColor = DEFAULT_COLOR; newFillColor = null; newFillOpacity = 4; newLineWidth = 2;
@@ -7173,9 +7544,39 @@ document.getElementById("ab-mv-down").addEventListener("click",  ()=>abStep(0,1)
 document.getElementById("ab-dup").addEventListener("click", duplicateSelection);
 document.getElementById("ab-fliph").addEventListener("click", ()=>flipSelection("h"));
 document.getElementById("ab-flipv").addEventListener("click", ()=>flipSelection("v"));
-document.getElementById("ab-sub").addEventListener("click", ()=>booleanSelection("sub"));
-document.getElementById("ab-and").addEventListener("click", ()=>booleanSelection("and"));
-document.getElementById("ab-or").addEventListener("click",  ()=>booleanSelection("or"));
+// パーツの合体：アイコンを押すと下にメニューが開き、そこでやり方を選ぶ
+const boolBtn = document.getElementById("ab-bool");
+const boolMenu = document.getElementById("bool-menu");
+document.body.appendChild(boolMenu);            // ツールバーの外に出す（切り取られないように）
+function closeBoolMenu(){ boolMenu.classList.remove("show"); boolBtn.classList.remove("open"); }
+function openBoolMenu(){
+  boolMenu.classList.add("show"); boolBtn.classList.add("open");
+  // ボタンの真下。画面からはみ出す時は内側へ寄せる
+  const b = boolBtn.getBoundingClientRect();
+  const w = boolMenu.offsetWidth, h = boolMenu.offsetHeight, pad = 6;
+  let L = b.left, T = b.bottom + 6;
+  if (L + w > innerWidth - pad) L = innerWidth - w - pad;
+  if (T + h > innerHeight - pad) T = Math.max(pad, b.top - h - 6);
+  boolMenu.style.left = Math.max(pad, L) + "px";
+  boolMenu.style.top  = T + "px";
+}
+boolBtn.addEventListener("click", (e)=>{
+  e.stopPropagation();
+  if (boolMenu.classList.contains("show")) closeBoolMenu(); else openBoolMenu();
+});
+boolMenu.addEventListener("click", (e)=>{
+  const b = e.target.closest("button[data-bool]");
+  if (!b) return;
+  closeBoolMenu();
+  booleanSelection(b.dataset.bool);
+});
+// 外を押したら閉じる（メニューの中を押した時は閉じない）
+document.addEventListener("mousedown", (e)=>{
+  if (!boolMenu.classList.contains("show")) return;
+  if (e.target.closest("#ab-bool-wrap") || e.target.closest("#bool-menu")) return;
+  closeBoolMenu();
+}, true);
+window.addEventListener("resize", ()=>{ if (boolMenu.classList.contains("show")) closeBoolMenu(); });
 document.getElementById("ab-group").addEventListener("click", groupSelection);
 document.getElementById("ab-ungroup").addEventListener("click", ungroupSelection);
 document.getElementById("ab-del").addEventListener("click", deleteSelection);
