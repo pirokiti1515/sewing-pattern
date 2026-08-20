@@ -5234,9 +5234,14 @@ function drawZip(frag, part){
   const total = polyLength(flat);
   // ファスナーは「記号」なので、引きで見ても読める最小の大きさを保つ。
   // 指定mmが画面上で小さくなりすぎる時だけ、画面基準の下限まで広げる。
+  // ただしその下限を効かせすぎると、縮小した時や短いファスナーで、
+  // 歯もスライダーも線より大きくなって形が崩れる（実際に起きていた）。
+  // そこで「線そのものの長さ」でも頭を打つ。指定mmより細かくはしない。
   const atLeast = (mm, minPx)=> Math.max(mm, minPx / view.scale);
-  const pitch = atLeast(Math.max(1, part.zipPitch || 3), 7);   // 歯の間隔
-  const arm   = atLeast(1.8, 4);                               // 歯の長さ（片側）
+  const fit = (v, want, frac)=> Math.max(want, Math.min(v, total * frac));
+  const want  = Math.max(1, part.zipPitch || 3);
+  const pitch = fit(atLeast(want, 7), want, 0.08);             // 歯の間隔（12個は並ぶように）
+  const arm   = Math.min(atLeast(1.8, 4), pitch * 0.6);        // 歯の長さ（間隔とつり合う範囲で）
   for (let d = pitch/2; d < total; d += pitch){
     const w = polyWalk(flat, d);
     const px = -w.uy, py = w.ux;
@@ -5245,7 +5250,8 @@ function drawZip(frag, part){
     frag.appendChild(mk("line", { x1:a.x, y1:a.y, x2:b.x, y2:b.y, class:"ziptooth", stroke:col }));
   }
   // スライダー本体（先が細い形）と引き手。外側へ向けて置く
-  const bodyL = atLeast(8.5, 18), bodyW = atLeast(5, 10.5);   // スライダー本体
+  const bodyL = fit(atLeast(8.5, 18), 8.5, 0.2);              // スライダー本体（線の2割まで）
+  const bodyW = Math.min(atLeast(5, 10.5), bodyL * 0.59);      // 横幅は本体の長さに比例させる
   const atEnd = (part.zipEnd !== 0);
   if (total < bodyL*0.6) return;                     // 短すぎる線には付けない
   const d0 = atEnd ? Math.max(0, total - bodyL/2) : Math.min(total, bodyL/2);
