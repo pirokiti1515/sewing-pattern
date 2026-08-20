@@ -3676,11 +3676,12 @@ function drawDimension(frag, part){
   // 寸法線と矢じり
   frag.appendChild(mk("path", { d:`M${sa.x} ${sa.y} L${sb.x} ${sb.y}`, class:"dimline", stroke:col,
     "data-part":part.id }));
+  const dimLen = Math.hypot(sb.x-sa.x, sb.y-sa.y);
   if (part.mone){                                  // アールは片側だけ矢じり
-    addArrowHead(frag, sb, sa, col, 9);
+    addArrowHead(frag, sb, sa, col, 9, dimLen);
   } else {
-    addArrowHead(frag, sa, sb, col, 9);
-    addArrowHead(frag, sb, sa, col, 9);
+    addArrowHead(frag, sa, sb, col, 9, dimLen);
+    addArrowHead(frag, sb, sa, col, 9, dimLen);
   }
   // 数値は、そのつど測り直して出す。
   // 書いた時の数字を持ち回ると、パーツを変形したときに古い数字が残り、
@@ -4663,7 +4664,12 @@ function renderParts(){
           const s = worldToScreen(fl[i]);
           if (Math.hypot(tip.x-s.x, tip.y-s.y) > 0.5){ prev = s; break; }
         }
-        if (prev) addArrowHead(frag, tip, prev, lineColorOf(part), 11);
+        let alen = 0;                                 // 矢印ぜんぶの画面上の長さ
+        for (let i=1;i<fl.length;i++){
+          const q0 = worldToScreen(fl[i-1]), q1 = worldToScreen(fl[i]);
+          alen += Math.hypot(q1.x-q0.x, q1.y-q0.y);
+        }
+        if (prev) addArrowHead(frag, tip, prev, lineColorOf(part), 11, alen);
       }
       continue;
     }
@@ -5259,7 +5265,11 @@ function drawZip(frag, part){
     d: poly([P(bodyL/2+stem,tabW), P(bodyL/2+stem+tabL,tabW), P(bodyL/2+stem+tabL,-tabW), P(bodyL/2+stem,-tabW)]),
     class:"ziptab", fill:"#ffffff", stroke:col }));
 }
-function addArrowHead(frag, tip, from, color, size){
+// lineLen（その矢印ぜんぶの画面上の長さ）を渡すと、頭の大きさをそれに合わせて小さくする。
+// 頭を固定の大きさにしていると、図を縮小した時に頭だけが残って塊に見える
+// （倍率0.5で頭が全体の95%、0.3以下では矢印より頭の方が長かった）。
+function addArrowHead(frag, tip, from, color, size, lineLen){
+  if (lineLen > 0) size = Math.max(1.5, Math.min(size, lineLen * 0.3));
   const dx = tip.x - from.x, dy = tip.y - from.y;
   const L = Math.hypot(dx, dy);
   if (!(L > 0.001)) return;
