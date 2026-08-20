@@ -3001,6 +3001,30 @@ function findAnyEdgeAt(sp){
   }
   return best.part ? best : null;
 }
+// 内側に引いてあるステッチの点線を押したかどうか。
+// 押せたら、そのパーツを選んで「内側○mm」を変えられるようにする（付け外しはしない）。
+function findStitchLineAt(sp){
+  let best = null;
+  for (const part of project.parts){
+    if (!part.closed || part.kind || part.nodes.length < 3 || !(part.stitch > 0)) continue;
+    const fi = flattenNodesIndexed(part.nodes, true);
+    const inner = innerOffset(fi.pts, part.stitch);
+    if (!inner || inner.length < 2) continue;
+    const chosen = (part.stitchEdges && part.stitchEdges.length) ? new Set(part.stitchEdges) : null;
+    const runs = chosen ? stitchRuns(inner, fi.range, chosen, part.nodes.length)
+                        : [inner.concat([inner[0]])];          // 一周ぶんは端をつないで測る
+    for (const run of runs){
+      for (let k=0; k+1<run.length; k++){
+        const a = worldToScreen(run[k]), b = worldToScreen(run[k+1]);
+        const dx=b.x-a.x, dy=b.y-a.y, L2=dx*dx+dy*dy||1;
+        let u=((sp.x-a.x)*dx+(sp.y-a.y)*dy)/L2; u=Math.max(0,Math.min(1,u));
+        const d=Math.hypot(sp.x-(a.x+dx*u), sp.y-(a.y+dy*u));
+        if (!best || d < best.d) best = { d, part };
+      }
+    }
+  }
+  return (best && best.d < 10) ? best : null;
+}
 // Flatten a part outline to a fine world-space polyline (for offset / area).
 function flattenNodes(nodes, closed, steps){
   steps = steps || 16;
@@ -4190,6 +4214,7 @@ function updateContextBar(){
     }
   }
   document.getElementById("ctx-stitch").classList.toggle("show", tool==="stitch");
+  if (tool==="stitch") syncStitchInput();      // 選んだステッチのいまの距離を数値欄に出す
   document.getElementById("ctx-zip").classList.toggle("show", tool==="zip" || (tool==="select" && selectedZip()));
   // 腕の連動スイッチの見た目
   const mb = document.getElementById("btn-mirror");
@@ -6057,6 +6082,15 @@ svg.addEventListener("mousedown", (e)=>{
   // ステッチツール：辺をクリックすると、その辺だけに内側の点線を付け外し
   if (tool==="stitch" && !draft){
     const eg = findAnyEdgeAt(sp);
+    // すでに入っている点線そのものを押した時は、付け外しではなく「選ぶ」。
+    // 上のバーの「内側○mm」にいまの値が出て、そこで距離を変えられる。
+    const st = findStitchLineAt(sp);
+    if (st && (!eg || st.d < eg.d)){
+      selectedPartId = st.part.id; multiSel = []; selVertex = null; selMode = "part";
+      syncStitchInput(true);
+      toast("このステッチを選びました。上の「内側○mm」で距離を変えられます");
+      render(); return;
+    }
     if (eg){
       pushUndo();
       const part = eg.part, mm = Math.max(1, parseFloat(document.getElementById("stitch-mm").value)||5);
@@ -7795,6 +7829,35 @@ function stitchInside(part, mm){
   saveLocal(); render();
   return true;
 }
+// 選んでいるもののうち、内側ステッチが入っている布パーツ
+function selectedStitchParts(){
+  const ids = new Set(multiSel.map(m=>m.partId));
+  if (selectedPartId) ids.add(selectedPartId);
+  return [...ids].map(id=>project.parts.find(p=>p.id===id))
+    .filter(p=>p && p.closed && !p.kind && p.stitch > 0);
+}
+// 選んだステッチの距離を、上のバーの数値欄に映す。
+// 選び直した時だけ書き換える（打っている最中に上書きすると入力できなくなるため）。
+let stitchSyncKey = null;
+function syncStitchInput(force){
+  const el = document.getElementById("stitch-mm");
+  const list = selectedStitchParts();
+  const key = list.map(p=>p.id+":"+p.stitch).join(",");   // 値も見る（取り消しで戻った時に欄も戻すため）
+  if (!force && (key === stitchSyncKey || document.activeElement === el)) return;
+  stitchSyncKey = key;
+  if (list.length) el.value = String(list[0].stitch);
+}
+// 数値をいじっている間は、まとめて1回の取り消しにする
+document.getElementById("stitch-mm").addEventListener("focusin", ()=>{
+  if (selectedStitchParts().length) pushUndo();
+});
+document.getElementById("stitch-mm").addEventListener("input", ()=>{
+  const list = selectedStitchParts();
+  if (!list.length) return;                    // 選んでいなければ「次に入れる時」の設定のまま
+  const mm = Math.max(1, parseFloat(document.getElementById("stitch-mm").value)||5);
+  for (const p of list) p.stitch = mm;
+  saveLocal(); render();
+});
 document.getElementById("btn-stitch-inside").addEventListener("click", ()=>{
   const mm = Math.max(1, parseFloat(document.getElementById("stitch-mm").value)||5);
   // switching to the stitch tool clears multiSel, so fall back to the last selected part
