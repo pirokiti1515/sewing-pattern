@@ -7359,9 +7359,23 @@ document.getElementById("btn-meas-label").addEventListener("click", ()=>{
               {x:measure.mid.x, y:measure.mid.y, hIn:null, hOut:null} ] };
     project.parts.push(p);
   } else if (measure.kind==="dist"){
-    // 直線距離：2点をそのまま結ぶ寸法線（引き出し線なし）
+    // 直線距離：2点の間に引いた線をパーツの外へ逃がし、両端に引き出し線を立てる。
+    // 逃がさずにパーツの上へ直接引くと、図と重なって読みにくかった（周長と同じ作法にそろえる）。
+    const dh = project.parts.find(q=>q.id===measure.partId);
+    let doff = 25;
+    if (dh && dh.nodes.length){
+      let dcx=0, dcy=0;
+      for (const q of dh.nodes){ dcx+=q.x; dcy+=q.y; }
+      dcx/=dh.nodes.length; dcy/=dh.nodes.length;
+      const dx=measure.b.x-measure.a.x, dy=measure.b.y-measure.a.y;
+      const dl=Math.hypot(dx,dy)||1;
+      const ppx=-dy/dl, ppy=dx/dl;                       // 測った線に直角な向き
+      const mx=(measure.a.x+measure.b.x)/2, my=(measure.a.y+measure.b.y)/2;
+      // パーツの真ん中から見て、外側になる方へ逃がす
+      doff = ((mx-dcx)*ppx + (my-dcy)*ppy >= 0) ? 25 : -25;
+    }
     const p = { id, kind:"mdim", meas:true, color:col, closed:false, name:"", qty:1, fabric:"",
-      seam:0, stitch:0, group:null, notches:[], mlabel:fmtMM(measure.value), moff:0,
+      seam:0, stitch:0, group:null, notches:[], mlabel:fmtMM(measure.value), moff:doff,
       mhost: measure.partId || null,          // どのパーツを測ったか（一緒に動かすため）
       nodes:[ {x:measure.a.x, y:measure.a.y, hIn:null, hOut:null},
               {x:measure.b.x, y:measure.b.y, hIn:null, hOut:null} ] };
