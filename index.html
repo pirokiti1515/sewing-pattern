@@ -521,6 +521,7 @@
       </span>
       <label title="パーツ同士の角・辺に吸着"><input type="checkbox" id="chk-magnet" checked>🧲吸着</label>
       <label title="ポイント（白い■・●）を表示する。合印を入れるときは、吸着できる場所が点で見えます"><input type="checkbox" id="chk-points" checked>◦ポイント</label>
+      <label id="lab-showdim" style="display:none" title="図面に書き込んだ寸法（計測の書き込み・寸法線）をまとめて表示／非表示。形だけを見たい時に外してください"><input type="checkbox" id="chk-showdim" checked>📐寸法</label>
     </span>
     <!-- 選択ツールで何も選んでいない時：かんたん計算機 -->
     <span class="ctx" id="ctx-calc">
@@ -1606,6 +1607,7 @@ function pointsInRect(x0,y0,x1,y1){
   const res=[];
   const inBox = (s)=> s.x>=xa && s.x<=xb && s.y>=ya && s.y<=yb;
   for (const part of project.parts){
+    if (dimOff(part)) continue;                        // 見えていないものは囲んでも選ばない
     // 寸法線は見えている線の位置で判定する。
     // 元の2点は離れた所にあるので、線を囲んだつもりでも入らなかった。
     const dim = dimDrawnSeg(part);
@@ -2595,6 +2597,7 @@ function findVertexAt(sp, prefer){
   let best = { d: Infinity, part: null, idx: -1, hole: undefined };
   let pref = { d: Infinity, part: null, idx: -1, hole: undefined };
   for (const part of project.parts){
+    if (dimOff(part)) continue;                        // 見えていないものは掴めない
     eachRing(part, (ring, hole)=>{
       const same = prefer && part.id===prefer.partId && hole===prefer.hole;
       for (let i=0;i<ring.length;i++){
@@ -4219,6 +4222,9 @@ function updateContextBar(){
       document.getElementById("text-vertical").checked = !!t.vertical;
     }
   }
+  // 「📐寸法」は、書き込んだ寸法が1つでもある時だけ出す（無い間はバーを混ませない）
+  document.getElementById("lab-showdim").style.display =
+    project.parts.some(isDimPart) ? "" : "none";
   document.getElementById("ctx-stitch").classList.toggle("show", tool==="stitch");
   if (tool==="stitch") syncStitchInput();      // 選んだステッチのいまの距離を数値欄に出す
   document.getElementById("ctx-zip").classList.toggle("show", tool==="zip" || (tool==="select" && selectedZip()));
@@ -4595,6 +4601,13 @@ function offScreen(part){
   return (x1+m < _viewBox.x0) || (x0-m > _viewBox.x1)
       || (y1+m < _viewBox.y0) || (y0-m > _viewBox.y1);
 }
+// 上のバーの「📐寸法」。外している間は、書き込んだ寸法を描かず、掴めなくもする。
+function showDimParts(){
+  const c = document.getElementById("chk-showdim");
+  return !c || c.checked;
+}
+const isDimPart = (p)=> !!p && (p.kind==="dim" || p.kind==="mdim");
+const dimOff = (p)=> isDimPart(p) && !showDimParts();
 // 上のバーの「◦ポイント」。外しているとポイントを一切描かない。
 function showPoints(){
   const c = document.getElementById("chk-points");
@@ -4603,6 +4616,7 @@ function showPoints(){
 // 描かれているパーツだけを順に返す（非表示・レイヤー非表示・画面外は除く）
 function* drawableParts(){
   for (const part of project.parts){
+    if (dimOff(part)) continue;                        // 「📐寸法」を外している
     if (part.nodes.length < 2 || part.hidden) continue;
     const lay = layerOf(part);
     if (lay && !lay.visible) continue;
@@ -4633,6 +4647,7 @@ function renderParts(){
   for (const part of project.parts){
     if (part.nodes.length < 2) continue;
     if (part.hidden) continue;                         // 非表示のパーツ
+    if (dimOff(part)) continue;                        // 「📐寸法」を外している
     const lay = layerOf(part);
     if (lay && !lay.visible) continue;                 // 非表示のレイヤーは描かない
     if (offScreen(part)) continue;                     // 画面の外は描かない（拡大時に効く）
@@ -5570,7 +5585,7 @@ function findLinePartAt(wp){
   const thr = 14 / view.scale;   // generous: thin lines are hard to hit exactly
   let best = { d: Infinity, part: null };
   for (const part of project.parts){
-    if (part.nodes.length < 2) continue;
+    if (part.nodes.length < 2 || dimOff(part)) continue;
     // 寸法線は「見えている線」で当たりを見る。
     // 測った2点はパーツの輪郭の上に乗っていることが多く、そちらで当てると
     // パーツを選びたいクリックを寸法線が横取りしてしまう。
@@ -7145,6 +7160,14 @@ function calcFmt(v){
   });
 })();
 document.getElementById("chk-dim").addEventListener("change", render);
+// 「📐寸法」を切り替えたら、描き直して設定も覚える
+document.getElementById("chk-showdim").addEventListener("change", ()=>{
+  if (!showDimParts()){
+    multiSel = multiSel.filter(m=>!isDimPart(project.parts.find(q=>q.id===m.partId)));
+    if (isDimPart(project.parts.find(q=>q.id===selectedPartId))) selectedPartId = null;
+  }
+  saveSettings(); render();
+});
 document.getElementById("grid-size").addEventListener("input", render);
 // ? ボタン＝使い方を開く。画面下のヒント帯は、その中のチェックで出し入れする。
 function openHelp(){
@@ -7343,6 +7366,19 @@ document.getElementById("btn-meas-clear").addEventListener("click", ()=>{
 });
 // 書き込み／取り消しを1つのボタンで行き来する。
 // 書き込んだ文字には目印（meas:true）を付けて、後からまとめて消せるようにする。
+// 寸法線をパーツからどれだけ離すか。
+// 測った長さで決めると、同じパーツでも縦と横で距離が変わって不揃いに見える。
+// パーツの大きさ（対角の長さ）で決めれば、そのパーツの寸法は全部同じ距離にそろう。
+function dimGapFor(host){
+  if (!host || !host.nodes || !host.nodes.length) return 40;
+  let x0=Infinity, y0=Infinity, x1=-Infinity, y1=-Infinity;
+  for (const q of host.nodes){
+    if (q.x<x0) x0=q.x; if (q.x>x1) x1=q.x;
+    if (q.y<y0) y0=q.y; if (q.y>y1) y1=q.y;
+  }
+  const diag = Math.hypot(x1-x0, y1-y0);
+  return Math.max(25, Math.min(250, diag * 0.09));
+}
 document.getElementById("btn-meas-label").addEventListener("click", ()=>{
   if (!measure || measure.straight) return;
   if (measure.textId){                                   // すでに書き込み済み → 消す
@@ -7367,9 +7403,7 @@ document.getElementById("btn-meas-label").addEventListener("click", ()=>{
     // 直線距離：2点の間に引いた線をパーツの外へ逃がし、両端に引き出し線を立てる。
     // 逃がさずにパーツの上へ直接引くと、図と重なって読みにくかった（周長と同じ作法にそろえる）。
     const dh = project.parts.find(q=>q.id===measure.partId);
-    // 逃がす量は「測った長さの1割（最低25mm）」。固定25mmだと、900mmのような
-    // 大きいパーツで寸法線がパーツに貼り付いて読みにくかった。
-    const dgap = Math.max(25, measure.value * 0.1);
+    const dgap = dimGapFor(dh);
     let doff = dgap;
     if (dh && dh.nodes.length){
       let dcx=0, dcy=0;
@@ -7408,9 +7442,7 @@ document.getElementById("btn-meas-label").addEventListener("click", ()=>{
     const host = project.parts.find(q=>q.id===measure.partId);
     let cx=0, cy=0;
     if (host){ for (const q of host.nodes){ cx+=q.x; cy+=q.y; } cx/=host.nodes.length; cy/=host.nodes.length; }
-    // 逃がす量は測った幅の1割（最低25mm）。大きいパーツほど遠くへ離す。
-    const span = Math.hypot(B.x-A.x, B.y-A.y);
-    const gap = Math.max(25, span * 0.1);
+    const gap = dimGapFor(host);
     let pos;
     if (axis==="h"){
       const ys = path.map(q=>q.y);
@@ -7448,7 +7480,8 @@ function saveSettings(){
       grid: document.getElementById("grid-size").value,
       stitch: document.getElementById("stitch-mm").value,
       zip: document.getElementById("zip-pitch").value,
-      fillet: document.getElementById("fillet-r").value
+      fillet: document.getElementById("fillet-r").value,
+      showdim: document.getElementById("chk-showdim").checked
     }));
   } catch(_){}
 }
@@ -7465,6 +7498,7 @@ function loadSettings(){
   set("text-font", v.font); set("text-size", v.tsize); set("text-color", v.tcolor);
   set("text-bold", v.tbold, true); set("text-vertical", v.tvert, true);
   set("grid-size", v.grid); set("stitch-mm", v.stitch); set("zip-pitch", v.zip); set("fillet-r", v.fillet);
+  set("chk-showdim", v.showdim===undefined ? true : v.showdim, true);
   const fs = document.getElementById("fillet-slider"); if (fs && v.fillet!==undefined) fs.value = v.fillet;
 }
 // 設定の色は3か所ともパレットから選ぶ（サイドバー・右クリックと同じ並び）
