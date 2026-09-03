@@ -3666,7 +3666,9 @@ function drawDimension(frag, part){
       frag.appendChild(mk("line", { x1:e1.x, y1:e1.y, x2:e2.x, y2:e2.y, class:"dimext", stroke:col }));
     }
   } else if (Math.abs(off) > 0.01){
-    const ext = off + (off>0 ? 4 : -4);
+    // 寸法線の先へ少し突き出させる（遠くへ逃がした時は、それに合わせて長めに）
+    const over = Math.max(4, Math.abs(off) * 0.06);
+    const ext = off + (off>0 ? over : -over);
     for (const q of [A,B]){
       const e1=worldToScreen({x:q.x+px*(off>0?2:-2), y:q.y+py*(off>0?2:-2)});
       const e2=worldToScreen({x:q.x+px*ext, y:q.y+py*ext});
@@ -3694,18 +3696,21 @@ function drawDimension(frag, part){
               : part.mone  ? ("R" + fmtMM(L).replace("mm",""))
               : fmtMM(L);
   const mid = { x:(A2.x+B2.x)/2, y:(A2.y+B2.y)/2 };
-  const sm = worldToScreen({ x:mid.x+px*3.5, y:mid.y+py*3.5 });
+  // 数字は「画面で見て」線から一定の距離に置く。
+  // mmで逃がすと、図を縮小した時に線の上へ乗ってしまう（文字の大きさは画面固定のため）。
+  const smBase = worldToScreen(mid);
+  const smOut  = worldToScreen({ x:mid.x+px, y:mid.y+py });
+  let ox = smOut.x-smBase.x, oy = smOut.y-smBase.y;
+  const ol = Math.hypot(ox, oy);
+  if (ol > 1e-6){ ox/=ol; oy/=ol; } else { ox = 0; oy = -1; }
+  const sm = { x: smBase.x + ox*12, y: smBase.y + oy*12 };
   const t = mk("text", { x:sm.x, y:sm.y, class:"dimtext", fill:col, "text-anchor":"middle" });
   t.textContent = label;
   // 他の寸法の数字と重ならない場所へずらす（読めなくなるのを防ぐ）
-  const smBase = worldToScreen(mid);
-  let sdx = sb.x-sa.x, sdy = sb.y-sa.y;
+  const sdx = sb.x-sa.x, sdy = sb.y-sa.y;
   const slen = Math.hypot(sdx, sdy) || 1;
   const sdir = { x:sdx/slen, y:sdy/slen };                 // 画面上での「線に沿った向き」
-  let spx = sm.x-smBase.x, spy = sm.y-smBase.y;
-  const spl = Math.hypot(spx, spy);
-  const sperp = (spl > 0.01) ? { x:spx/spl, y:spy/spl }    // 画面上での「線から離れる向き」
-                             : { x:-sdir.y, y:sdir.x };
+  const sperp = { x:ox, y:oy };                            // 画面上での「線から離れる向き」
   const away = avoidLabelOverlap(sm, label, sdir, sperp, slen);
   if (away){ t.setAttribute("x", away.x); t.setAttribute("y", away.y); }
   frag.appendChild(t);
@@ -7362,17 +7367,28 @@ document.getElementById("btn-meas-label").addEventListener("click", ()=>{
     // 直線距離：2点の間に引いた線をパーツの外へ逃がし、両端に引き出し線を立てる。
     // 逃がさずにパーツの上へ直接引くと、図と重なって読みにくかった（周長と同じ作法にそろえる）。
     const dh = project.parts.find(q=>q.id===measure.partId);
-    let doff = 25;
+    // 逃がす量は「測った長さの1割（最低25mm）」。固定25mmだと、900mmのような
+    // 大きいパーツで寸法線がパーツに貼り付いて読みにくかった。
+    const dgap = Math.max(25, measure.value * 0.1);
+    let doff = dgap;
     if (dh && dh.nodes.length){
       let dcx=0, dcy=0;
       for (const q of dh.nodes){ dcx+=q.x; dcy+=q.y; }
       dcx/=dh.nodes.length; dcy/=dh.nodes.length;
       const dx=measure.b.x-measure.a.x, dy=measure.b.y-measure.a.y;
       const dl=Math.hypot(dx,dy)||1;
-      const ppx=-dy/dl, ppy=dx/dl;                       // 測った線に直角な向き
+      let ppx=-dy/dl, ppy=dx/dl;                         // 測った線に直角な向き
       const mx=(measure.a.x+measure.b.x)/2, my=(measure.a.y+measure.b.y)/2;
       // パーツの真ん中から見て、外側になる方へ逃がす
-      doff = ((mx-dcx)*ppx + (my-dcy)*ppy >= 0) ? 25 : -25;
+      const sign = ((mx-dcx)*ppx + (my-dcy)*ppy >= 0) ? 1 : -1;
+      ppx*=sign; ppy*=sign;
+      // パーツからどれだけ出ているかを見て、必ず外側に出す（斜めに測った時も）
+      let stick = 0;
+      for (const q of dh.nodes){
+        const pr = (q.x-mx)*ppx + (q.y-my)*ppy;
+        if (pr > stick) stick = pr;
+      }
+      doff = sign * (stick + dgap);
     }
     const p = { id, kind:"mdim", meas:true, color:col, closed:false, name:"", qty:1, fabric:"",
       seam:0, stitch:0, group:null, notches:[], mlabel:fmtMM(measure.value), moff:doff,
@@ -7392,13 +7408,16 @@ document.getElementById("btn-meas-label").addEventListener("click", ()=>{
     const host = project.parts.find(q=>q.id===measure.partId);
     let cx=0, cy=0;
     if (host){ for (const q of host.nodes){ cx+=q.x; cy+=q.y; } cx/=host.nodes.length; cy/=host.nodes.length; }
+    // 逃がす量は測った幅の1割（最低25mm）。大きいパーツほど遠くへ離す。
+    const span = Math.hypot(B.x-A.x, B.y-A.y);
+    const gap = Math.max(25, span * 0.1);
     let pos;
     if (axis==="h"){
       const ys = path.map(q=>q.y);
-      pos = ((A.y+B.y)/2 <= cy) ? Math.min(...ys)-25 : Math.max(...ys)+25;
+      pos = ((A.y+B.y)/2 <= cy) ? Math.min(...ys)-gap : Math.max(...ys)+gap;
     } else {
       const xs = path.map(q=>q.x);
-      pos = ((A.x+B.x)/2 <= cx) ? Math.min(...xs)-25 : Math.max(...xs)+25;
+      pos = ((A.x+B.x)/2 <= cx) ? Math.min(...xs)-gap : Math.max(...xs)+gap;
     }
     const p = { id, kind:"mdim", meas:true, color:col, closed:false, name:"", qty:1, fabric:"",
       seam:0, stitch:0, group:null, notches:[], mlabel:fmtMM(measure.value),
