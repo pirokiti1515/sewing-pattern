@@ -2714,18 +2714,40 @@ function segControls(nodes, i, closed){
   return { A, B, c1, c2, straight: !A.hOut && !B.hIn };
 }
 // Auto handle offset for a node, tangent to its neighbors (used by corner<->smooth toggle).
-function autoHandle(nodes, i, closed){
+// 角を曲線に変えた時の「腕」を決める。
+// 以前は前後の点を結んだ向きの1/6を左右そろえて使っていたので、
+// 両隣の辺の長さが違うと ①向きが長い辺の側へ傾いて左右非対称に丸まる
+// ②短い辺より腕が長くなり、その辺がふくらむ（実測で辺の667%）という崩れ方をした。
+// 向きは辺の長さに引きずられない「二等分の向き」、長さはそれぞれの辺に合わせる。
+// とがった角ほど腕を短くするので、辺からはみ出してふくらむことがない。
+function autoHandlePair(nodes, i, closed){
+  const p1 = nodes[i];
   const p0 = nbNode(nodes, i-1, closed), p2 = nbNode(nodes, i+1, closed);
-  return { x: (p2.x - p0.x)/6, y: (p2.y - p0.y)/6 };
+  const fb = { x:(p2.x-p0.x)/6, y:(p2.y-p0.y)/6 };                  // 決められない時の従来値
+  const pair = (t)=> ({ in:{ x:-t.x, y:-t.y }, out:{ x:t.x, y:t.y } });
+  const v0 = { x:p0.x-p1.x, y:p0.y-p1.y }, v2 = { x:p2.x-p1.x, y:p2.y-p1.y };
+  const d0 = Math.hypot(v0.x, v0.y), d2 = Math.hypot(v2.x, v2.y);
+  if (!(d0 > 1e-9) || !(d2 > 1e-9)) return pair(fb);
+  const u0 = { x:v0.x/d0, y:v0.y/d0 }, u2 = { x:v2.x/d2, y:v2.y/d2 };
+  let tx = u2.x-u0.x, ty = u2.y-u0.y;
+  const tl = Math.hypot(tx, ty);                                    // = 2×sin(角の半分)
+  if (tl < 1e-6) return pair(fb);                                   // 折り返し（角が0°）
+  tx /= tl; ty /= tl;
+  const k = (tl/2) / 3;         // 角が開いているほど長く、とがっているほど短く
+  // 長さは短い方の辺に合わせる。長い辺に合わせると、その辺が大きく反って
+  // 「角を丸めた」ではなく「形が変わった」ように見える。
+  const len = Math.min(d0, d2) * k;
+  return { in:{ x:-tx*len, y:-ty*len }, out:{ x:tx*len, y:ty*len } };
 }
+function autoHandle(nodes, i, closed){ return autoHandlePair(nodes, i, closed).out; }
 function isCorner(node){ return !node.hIn && !node.hOut; }
 // Toggle a node between corner (no handles) and smooth (symmetric handles).
 function toggleNodeSmooth(nodes, i, closed){
   const nd = nodes[i];
   if (isCorner(nd)){
-    const t = autoHandle(nodes, i, closed);
-    nd.hOut = { x:t.x, y:t.y };
-    nd.hIn  = { x:-t.x, y:-t.y };
+    const h = autoHandlePair(nodes, i, closed);
+    nd.hOut = { x:h.out.x, y:h.out.y };
+    nd.hIn  = { x:h.in.x,  y:h.in.y  };
   } else {
     nd.hIn = null; nd.hOut = null;
   }
@@ -6023,8 +6045,8 @@ svg.addEventListener("mousedown", (e)=>{
           else if (!nd.hIn && !nd.hOut){
             // 直線の途中に足した時は腕が付かないので、辺に沿った腕を付けて丸にする
             // （辺と同じ向きなので形は変わらない）
-            const t = autoHandle(ring, idx, closed);
-            nd.hOut = { x:t.x, y:t.y }; nd.hIn = { x:-t.x, y:-t.y };
+            const h = autoHandlePair(ring, idx, closed);
+            nd.hOut = { x:h.out.x, y:h.out.y }; nd.hIn = { x:h.in.x, y:h.in.y };
           }
           if (eg.hole===undefined){                                   // 左右対称は外枠だけの仕組み
             const side = (eg.part.symAxis!==undefined)
@@ -6052,8 +6074,8 @@ svg.addEventListener("mousedown", (e)=>{
         pushUndo();
         const nd = vRing[v.idx];
         if (tool==="pt-corner"){ nd.hIn = null; nd.hOut = null; }
-        else { const t = autoHandle(vRing, v.idx, vClosed);
-               nd.hOut = { x:t.x, y:t.y }; nd.hIn = { x:-t.x, y:-t.y }; }
+        else { const h = autoHandlePair(vRing, v.idx, vClosed);
+               nd.hOut = { x:h.out.x, y:h.out.y }; nd.hIn = { x:h.in.x, y:h.in.y }; }
         applyMirrorToNodes([vKey]);                        // 反対側も同じ形に（穴は対象外）
         selectedPartId = v.part.id; selVertex = vKey;
         saveLocal(); render(); return;
